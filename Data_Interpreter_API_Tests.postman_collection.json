@@ -1,0 +1,625 @@
+{
+  "info": {
+    "name": "Data Interpreter Assistant API",
+    "description": "Comprehensive test collection for the Data Interpreter Assistant API with Voice support. This collection includes test cases for natural language query processing, authentication, and system verification.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "demo_token_admin_12345",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "demo_token_admin_12345",
+      "type": "string"
+    },
+    {
+      "key": "analystToken", 
+      "value": "demo_token_analyst_12345",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "🏠 System Health & Info",
+      "item": [
+        {
+          "name": "API Root - Welcome",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": ["{{baseUrl}}"],
+              "path": [""]
+            },
+            "description": "Test the root endpoint to get API information and available endpoints"
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/",
+                  "host": ["{{baseUrl}}"],
+                  "path": [""]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"message\": \"🚀 Data Interpreter Assistant API\",\n  \"status\": \"healthy\",\n  \"version\": \"1.0.0\",\n  \"timestamp\": \"2025-08-13T10:30:00.000Z\",\n  \"documentation\": \"/docs\",\n  \"health_check\": \"/health\",\n  \"endpoints\": {\n    \"query\": \"/query\",\n    \"verify\": \"/verify\",\n    \"summary\": \"/summary\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Comprehensive health check of the API service"
+          },
+          "response": [
+            {
+              "name": "Healthy Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/health",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["health"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"status\": \"healthy\",\n  \"service\": \"Data Interpreter Assistant API\",\n  \"version\": \"1.0.0\",\n  \"timestamp\": \"2025-08-13T10:30:00.000Z\",\n  \"uptime\": \"Running\",\n  \"environment\": \"development\",\n  \"database\": \"Connected\",\n  \"api_docs\": \"/docs\"\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Basic system health and information endpoints"
+    },
+    {
+      "name": "🔍 Query Processing",
+      "item": [
+        {
+          "name": "Test Case 1: Simple Count Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"How many citizens are in the database?\",\n  \"execute\": true,\n  \"return_chart_suggestion\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/query",
+              "host": ["{{baseUrl}}"],
+              "path": ["query"]
+            },
+            "description": "Test a simple count query to verify basic natural language processing"
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"How many citizens are in the database?\",\n  \"execute\": true,\n  \"return_chart_suggestion\": true\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/query",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["query"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"status\": \"success\",\n  \"original_query\": \"How many citizens are in the database?\",\n  \"sql_query\": \"SELECT COUNT(*) as total_citizens FROM citizens\",\n  \"method\": \"hardcoded_mapping\",\n  \"confidence\": 0.95,\n  \"chart_type\": \"metric\",\n  \"execution_status\": \"success\",\n  \"data\": [{\"total_citizens\": 5}],\n  \"row_count\": 1,\n  \"summary\": \"Query executed successfully. Retrieved 1 records.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Test Case 2: Data Filtering Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{analystToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Show me citizens above age 30\",\n  \"execute\": true,\n  \"return_chart_suggestion\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/query",
+              "host": ["{{baseUrl}}"],
+              "path": ["query"]
+            },
+            "description": "Test data filtering with age-based criteria"
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"Show me citizens above age 30\",\n  \"execute\": true,\n  \"return_chart_suggestion\": true\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/query",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["query"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"status\": \"success\",\n  \"original_query\": \"Show me citizens above age 30\",\n  \"sql_query\": \"SELECT * FROM citizens WHERE age > 30 ORDER BY age DESC\",\n  \"method\": \"pattern_matching\",\n  \"confidence\": 0.85,\n  \"chart_type\": \"table\",\n  \"execution_status\": \"success\",\n  \"data\": [\n    {\"citizen_id\": 3, \"name\": \"Alice Johnson\", \"age\": 45, \"gender\": \"Female\", \"address\": \"789 Oak St\"},\n    {\"citizen_id\": 4, \"name\": \"Bob Wilson\", \"age\": 38, \"gender\": \"Male\", \"address\": \"321 Pine St\"}\n  ],\n  \"row_count\": 2,\n  \"summary\": \"Query executed successfully. Retrieved 2 records.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Test Case 3: Scheme Information Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"List all welfare schemes\",\n  \"execute\": true,\n  \"return_chart_suggestion\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/query",
+              "host": ["{{baseUrl}}"],
+              "path": ["query"]
+            },
+            "description": "Test querying welfare schemes without authentication"
+          },
+          "response": [
+            {
+              "name": "Success Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"List all welfare schemes\",\n  \"execute\": true,\n  \"return_chart_suggestion\": true\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/query",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["query"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"status\": \"success\",\n  \"original_query\": \"List all welfare schemes\",\n  \"sql_query\": \"SELECT * FROM schemes ORDER BY scheme_id\",\n  \"method\": \"hardcoded_mapping\",\n  \"confidence\": 0.9,\n  \"chart_type\": \"table\",\n  \"execution_status\": \"success\",\n  \"data\": [\n    {\"scheme_id\": 1, \"name\": \"MGNREGA\", \"sector\": \"Employment\", \"budget\": 50000000},\n    {\"scheme_id\": 2, \"name\": \"PMAY\", \"sector\": \"Housing\", \"budget\": 30000000},\n    {\"scheme_id\": 3, \"name\": \"Ujjwala Yojana\", \"sector\": \"Energy\", \"budget\": 20000000}\n  ],\n  \"row_count\": 3,\n  \"summary\": \"Query executed successfully. Retrieved 3 records.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Test Case 4: Invalid Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"Show me purple elephants dancing\",\n  \"execute\": true,\n  \"return_chart_suggestion\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/query",
+              "host": ["{{baseUrl}}"],
+              "path": ["query"]
+            },
+            "description": "Test error handling with an invalid query that cannot be processed"
+          },
+          "response": [
+            {
+              "name": "Error Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"query\": \"Show me purple elephants dancing\",\n  \"execute\": true,\n  \"return_chart_suggestion\": true\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/query",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["query"]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"success\": false,\n  \"status\": \"error\",\n  \"message\": \"Unable to convert natural language query to SQL\",\n  \"original_query\": \"Show me purple elephants dancing\",\n  \"suggestions\": [\n    \"How many citizens are in the database?\",\n    \"List all welfare schemes\",\n    \"Show citizens above age 30\"\n  ],\n  \"error_type\": \"query_conversion_failed\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "GET Query (Backwards Compatibility)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/query?question=How many citizens&execute=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["query"],
+              "query": [
+                {
+                  "key": "question",
+                  "value": "How many citizens"
+                },
+                {
+                  "key": "execute",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Test the GET endpoint for backwards compatibility"
+          }
+        }
+      ],
+      "description": "Test cases for natural language query processing"
+    },
+    {
+      "name": "🔧 System Verification",
+      "item": [
+        {
+          "name": "Database Verification",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/verify/database",
+              "host": ["{{baseUrl}}"],
+              "path": ["verify", "database"]
+            },
+            "description": "Verify database connectivity and status"
+          },
+          "response": [
+            {
+              "name": "Database Connected",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/verify/database",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["verify", "database"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"success\": true,\n  \"message\": \"Database connection successful\",\n  \"database\": \"Connected\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Authentication Verification",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/verify/auth",
+              "host": ["{{baseUrl}}"],
+              "path": ["verify", "auth"]
+            },
+            "description": "Verify authentication system status"
+          }
+        },
+        {
+          "name": "System Overview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/verify/system",
+              "host": ["{{baseUrl}}"],
+              "path": ["verify", "system"]
+            },
+            "description": "Comprehensive system health check"
+          }
+        }
+      ],
+      "description": "System verification and health check endpoints"
+    },
+    {
+      "name": "📊 Data Analytics",
+      "item": [
+        {
+          "name": "Overall Database Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["summary"]
+            },
+            "description": "Get comprehensive database summary and statistics"
+          },
+          "response": [
+            {
+              "name": "Summary Response",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/summary",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["summary"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"status\": \"success\",\n  \"summary\": {\n    \"tables\": {\n      \"citizens\": {\n        \"record_count\": 5,\n        \"status\": \"accessible\"\n      },\n      \"officers\": {\n        \"record_count\": 3,\n        \"status\": \"accessible\"\n      },\n      \"schemes\": {\n        \"record_count\": 3,\n        \"status\": \"accessible\"\n      }\n    },\n    \"total_records\": 11,\n    \"database_info\": {\n      \"total_tables\": 3,\n      \"table_names\": [\"citizens\", \"officers\", \"schemes\"]\n    }\n  },\n  \"message\": \"Summary generated successfully\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Table-Specific Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{analystToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/summary?table=citizens",
+              "host": ["{{baseUrl}}"],
+              "path": ["summary"],
+              "query": [
+                {
+                  "key": "table",
+                  "value": "citizens"
+                }
+              ]
+            },
+            "description": "Get detailed summary for a specific table"
+          }
+        }
+      ],
+      "description": "Data analytics and summary endpoints"
+    },
+    {
+      "name": "🛡️ Authentication Tests",
+      "item": [
+        {
+          "name": "Query without Authentication",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"query\": \"List all schemes\",\n  \"execute\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/query",
+              "host": ["{{baseUrl}}"],
+              "path": ["query"]
+            },
+            "description": "Test query processing without authentication (should work for basic queries)"
+          }
+        },
+        {
+          "name": "Custom SQL with Invalid Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer invalid_token_123"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sql_query\": \"SELECT * FROM citizens LIMIT 5\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/query/execute",
+              "host": ["{{baseUrl}}"],
+              "path": ["query", "execute"]
+            },
+            "description": "Test custom SQL execution with invalid authentication token"
+          },
+          "response": [
+            {
+              "name": "Unauthorized",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer invalid_token_123"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"sql_query\": \"SELECT * FROM citizens LIMIT 5\"\n}"
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/query/execute",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["query", "execute"]
+                }
+              },
+              "status": "Unauthorized",
+              "code": 401,
+              "_postman_previewlanguage": "json",
+              "header": [],
+              "cookie": [],
+              "body": "{\n  \"detail\": \"Invalid authentication token\"\n}"
+            }
+          ]
+        }
+      ],
+      "description": "Authentication and authorization test cases"
+    },
+    {
+      "name": "📚 Sample Queries",
+      "item": [
+        {
+          "name": "Get Sample Queries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/query/samples",
+              "host": ["{{baseUrl}}"],
+              "path": ["query", "samples"]
+            },
+            "description": "Get available sample queries organized by category"
+          }
+        }
+      ],
+      "description": "Sample query endpoints for user guidance"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Log the request",
+          "console.log('🔵 Making request to:', pm.request.url.toString());"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Basic response validation",
+          "pm.test('Status code is not 5xx', function () {",
+          "    pm.expect(pm.response.code).to.be.below(500);",
+          "});",
+          "",
+          "pm.test('Response is JSON', function () {",
+          "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
+          "});",
+          "",
+          "// Log the response",
+          "console.log('🟢 Response status:', pm.response.status, pm.response.code);"
+        ]
+      }
+    }
+  ]
+}

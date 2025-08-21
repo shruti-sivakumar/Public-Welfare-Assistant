@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.env
+.env*
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+
+# Database
+*.db
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual Environments
+venv/
+.venv/
+.venv-clean/
+
+# Logs
+*.log
+
+# Test/coverage
+htmlcov/
+.coverage
+coverage.xml
+
+# Misc
+*.bak
+*.swp
+*.swo
+
+# Node
+node_modules/

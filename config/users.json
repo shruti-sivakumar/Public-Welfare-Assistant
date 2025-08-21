@@ -1,0 +1,23 @@
+{
+  "admin": {
+    "password_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+    "role": "Admin",
+    "district": "Mumbai",
+    "name": "System Administrator",
+    "created": "2025-08-09T18:15:50.643252"
+  },
+  "analyst": {
+    "password_hash": "20249749412d73a3f5799f6f1dcf910e7b4aa3ce4de133b1f8a63c044792a4e9",
+    "role": "Analyst",
+    "district": "Mumbai",
+    "name": "Data Analyst",
+    "created": "2025-08-09T18:15:50.643252"
+  },
+  "officer": {
+    "password_hash": "118b8d35a17bcf2c7d2d790509e12308dc6332c5d234f0098d2d6be6700bebb1",
+    "role": "Officer",
+    "district": "Bangalore",
+    "name": "Welfare Officer",
+    "created": "2025-08-09T18:15:50.643252"
+  }
+}
