@@ -36,9 +36,6 @@ class PromptEngine:
         self.entity_synonyms = self._initialize_entity_synonyms()
         self.operation_patterns = self._initialize_operation_patterns()
         
-    # GPT integration settings (for future use)
-    # self.use_gpt = os.getenv('USE_GPT_QUERY_PROCESSING', 'false').lower() == 'true'
-    # self.gpt_api_key = os.getenv('OPENAI_API_KEY')
     
     def _initialize_hardcoded_queries(self) -> Dict[str, str]:
         """Initialize comprehensive hardcoded query mappings"""

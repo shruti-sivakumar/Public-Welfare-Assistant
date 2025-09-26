@@ -9,26 +9,73 @@ from io import BytesIO
 import requests
 
 # Import our modules
-from frontend.database import get_database
-from frontend.database_config import show_database_config, check_database_connection
-from frontend.auth import (
-    show_login_page, 
-    is_authenticated, 
-    require_auth, 
-    show_user_profile,
-    logout_user,
-    add_user,
-    update_user_password,
-    list_users
+from azure_db import init_database_connection, test_connection, execute_query
+from azure_openai import natural_language_to_sql, test_openai_connection
+
+# Try to import database module with fallback
+try:
+    from database import get_database
+except ImportError as e:
+    st.error(f"Database module import error: {e}")
+    def get_database():
+        return None
+
+from in_app_auth import (
+    require_in_app_authentication, 
+    show_user_profile_sidebar,
+    get_current_user,
+    has_role,
+    is_authenticated
 )
+from rbac import rbac, show_access_control_panel, show_role_guard, show_feature_guard, can_query_database, can_export_data, is_admin, is_analyst, is_officer
 
 # Page config
 st.set_page_config(
-    page_title="Welfare Database Interface",
-    page_icon="🏛️",
+    page_title="Public Welfare Assistant",
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Custom CSS for professional styling
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #1f2937;
+        margin-bottom: 1rem;
+        text-align: center;
+        padding: 1rem 0;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
+    .status-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+    }
+    
+    .user-info {
+        background: #ffffff;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+    
+    .professional-table {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+    }
+    
+    /* Hide Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
 
 # Initialize session state
 def init_session_state():
@@ -48,6 +95,33 @@ def init_session_state():
         st.session_state.current_query = ""
     if 'current_page' not in st.session_state:
         st.session_state.current_page = "Home"
+    # Global database connection flag
+    if 'global_db_connected' not in st.session_state:
+        st.session_state.global_db_connected = False
+
+# Auto-connect to Azure Database BEFORE login
+def auto_connect_database():
+    """Automatically connect to Azure Database when app starts - before login"""
+    # Use a simple global connection flag
+    if not st.session_state.get('global_db_connected', False):
+        with st.spinner("Connecting to Azure SQL Database..."):
+            # Initialize the connection (cached)
+            conn = init_database_connection()
+            if conn:
+                # Test the connection
+                if test_connection(show_messages=False):
+                    st.session_state.global_db_connected = True
+                    st.session_state.db_connected = True
+                    st.success("Azure Database connected successfully!")
+                    return True
+                else:
+                    st.error("Database connection test failed!")
+                    return False
+            else:
+                st.error("Failed to establish database connection!")
+                return False
+    return True
+
     if 'db_connected' not in st.session_state:
         st.session_state.db_connected = False
     if 'api_connected' not in st.session_state:
@@ -72,34 +146,7 @@ def show_api_status_popup():
     # Check connection
     is_connected = check_api_connection()
     
-    # Show status in sidebar
-    with st.sidebar:
-        st.divider()
-        st.subheader("🔗 API Connection Status")
-        
-        if is_connected:
-            st.success("✅ FastAPI Backend Connected")
-            st.write("Backend URL: http://127.0.0.1:8080")
-        else:
-            st.error("❌ FastAPI Backend Disconnected")
-            st.warning("Please start the FastAPI server")
-            
-            with st.expander("📋 How to start the backend"):
-                st.code("""
-# Navigate to project directory
-cd "C:\\Users\\vidan\\Desktop\\SEM-5\\DBMS\\DBMS + CLOUD"
-
-# Activate virtual environment
-.venv\\Scripts\\activate
-
-# Start FastAPI server
-cd app
-uvicorn main:app --reload
-                """, language="bash")
-        
-        # Refresh button
-        if st.button("🔄 Refresh Connection", type="secondary"):
-            st.rerun()
+    # API connection status is now handled in create_sidebar()
     
     # Show modal-style notification if disconnected
     if not is_connected:
@@ -107,12 +154,15 @@ uvicorn main:app --reload
         with st.container():
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
-                st.error("⚠️ API Backend Not Available")
+                st.error("API Backend Not Available")
                 st.info("Some features may not work properly without the FastAPI backend connection.")
     
     return is_connected
 
 init_session_state()
+
+# Auto-connect to Azure Database BEFORE any user interaction
+auto_connect_database()
 
 # Load data from database or fallback to sample data
 @st.cache_data
@@ -168,123 +218,225 @@ def load_data_from_db():
 
 schemes_data, districts_list = load_data_from_db()
 
-# Authentication
+# Authentication (In-App Auth0)
 def show_login():
-    """Redirect to new authentication system"""
-    show_login_page()
+    """Show in-app authentication page"""
+    require_in_app_authentication()
 
 # Sidebar
 def create_sidebar():
     with st.sidebar:
-        # Logo and title
-        st.header("🏛️ Welfare Database")
+        # Public Welfare Assistant at the very top
+        st.markdown("# Public Welfare Assistant")
+        st.markdown("**System Administrator**")
         
-        # Show user profile
-        show_user_profile()
-        
-        st.divider()
-        
-        # Global filters
-        st.subheader("🔍 Global Filters")
-        
-        # Date range
-        date_from = st.date_input("From Date", datetime.now() - timedelta(days=30))
-        date_to = st.date_input("To Date", datetime.now())
-        
-        # Scheme filter with error handling
-        try:
-            scheme_options = schemes_data['name'].tolist() if not schemes_data.empty else []
-            default_schemes = scheme_options[:3] if len(scheme_options) > 3 else scheme_options  # Limit defaults to avoid UI clutter
+        # Show user email right after title
+        user = get_current_user()
+        if user:
+            st.markdown(f"**{user.get('email', 'No email')}**")
             
-            selected_schemes = st.multiselect(
-                "Schemes",
-                options=scheme_options,
-                default=default_schemes
-            )
-        except Exception as e:
-            st.error(f"Error loading schemes: {str(e)}")
-            selected_schemes = []
-        
-        # Region filter with robust error handling
-        try:
-            user_district = st.session_state.get('user_district', '')
+            st.divider()
             
-            # Ensure we have districts list
-            if not districts_list:
-                st.warning("No districts available")
-                selected_regions = []
-            else:
-                # Check if user district is valid
-                if user_district and user_district in districts_list:
-                    default_regions = [user_district]
+            # API Connection Status right after user info
+            st.subheader("API Connection Status")
+            
+            # Backend API Status
+            try:
+                backend_url = st.session_state.get('backend_url', 'http://127.0.0.1:8080')
+                response = requests.get(f"{backend_url}/health", timeout=2)
+                if response.status_code == 200:
+                    st.success("FastAPI Backend Connected")
+                    st.write(f"Backend URL: {backend_url}")
                 else:
-                    # Safe fallback to first few districts
-                    default_regions = districts_list[:1]  # Just use first district as default
-                
-                selected_regions = st.multiselect(
-                    "Regions",
-                    options=districts_list,
-                    default=default_regions,
-                    help="Select one or more districts to filter data"
-                )
-        except Exception as e:
-            st.error(f"Error loading regions: {str(e)}")
-            selected_regions = []
+                    st.error("FastAPI Backend Connected")
+            except:
+                st.error("FastAPI Backend Connected")
+            
+            if st.button("Refresh Connection", type="secondary", key="sidebar_refresh"):
+                st.rerun()
+            
+            st.divider()
+            
+            # System Administrator role display
+            st.markdown(f"**{user.get('name', 'User')}**")
+            
+            # Show user roles
+            roles = user.get('roles', [])
+            if roles:
+                role_display = ', '.join([role.title() for role in roles])
+                st.markdown(f"**Role:** {role_display}")
+            
+            # Show access level
+            st.markdown("**Access Level:**")
+            if is_admin():
+                st.success("Administrator")
+            elif is_analyst():
+                st.info("Data Analyst")
+            elif is_officer():
+                st.warning("Welfare Officer")
+            else:
+                st.write("Basic User")
+            
+            # Show last login (but NOT logout button here)
+            if hasattr(st.session_state, 'last_login'):
+                st.write(f"Last login: {st.session_state.last_login}")
         
         st.divider()
+        
+
         
         # Quick actions
-        st.subheader("⚡ Quick Actions")
+        st.subheader("Quick Actions")
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🆕 New Query", use_container_width=True):
-                st.session_state.current_query = ""
+            if st.button("New Query", use_container_width=True, key="sidebar_new_query"):
+                # Clear the query input by resetting session state
+                if 'query_input' in st.session_state:
+                    st.session_state['query_input'] = ""
+                if 'current_query' in st.session_state:
+                    st.session_state['current_query'] = ""
+                if 'transcribed_text' in st.session_state:
+                    st.session_state['transcribed_text'] = ""
+                st.success("New query started!")
         with col2:
-            if st.button("🗑️ Clear History", use_container_width=True):
+            if st.button("Clear History", use_container_width=True, key="sidebar_clear_history"):
+                if 'chat_history' not in st.session_state:
+                    st.session_state.chat_history = []
                 st.session_state.chat_history = []
+                st.success("Chat history cleared!")
         
-        if st.button("📊 Export Data", use_container_width=True):
-            st.info("Export functionality will be implemented")
+        if st.button("Export Data", use_container_width=True, key="sidebar_export_data"):
+            # Create a simple export of current session data
+            try:
+                user = get_current_user()
+                export_data = {
+                    'timestamp': datetime.now().isoformat(),
+                    'user': user.get('name', 'Unknown') if user else 'Unknown',
+                    'email': user.get('email', 'No email') if user else 'No email',
+                    'role': ', '.join([role.title() for role in user.get('roles', [])]) if user else 'Unknown',
+                    'chat_history_count': len(st.session_state.get('chat_history', [])),
+                    'session_info': 'Public Welfare Assistant Session Data'
+                }
+                import json
+                st.download_button(
+                    label="Download Session Data",
+                    data=json.dumps(export_data, indent=2),
+                    file_name=f"pwa_session_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+            except Exception as e:
+                st.error(f"Export failed: {str(e)}")
+        
+        # Add space before logout button at the very bottom
+        st.markdown("---")
+        
+        # Logout button at the very bottom
+        if st.button("Logout", type="primary", use_container_width=True, key="sidebar_logout"):
+            # Clear all session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.success("Logged out successfully!")
             st.rerun()
     
-    return selected_schemes, selected_regions, date_from, date_to
+    # Return empty values since filters are removed
+    return [], [], datetime.now() - timedelta(days=30), datetime.now()
 
 
 # Main pages
 def ask_page(selected_schemes):
-    st.header("💬 Database Query Interface")
+    st.header("Database Query Interface")
     
     # Show connection status
     api_connected = st.session_state.get('api_connected', False)
     db_connected = st.session_state.get('db_connected', False)
     
-    if api_connected:
-        st.success("🚀 Using FastAPI Backend for enhanced query processing")
+    # Test OpenAI connection
+    openai_connected = test_openai_connection()
+    
+    # Status indicators
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if db_connected:
+            st.success("�️ Azure SQL: Connected")
+        else:
+            st.error("Azure SQL: Disconnected")
+    
+    with col2:
+        if openai_connected:
+            st.success("Azure OpenAI: Connected")
+        else:
+            st.error("Azure OpenAI: Disconnected")
+    
+    with col3:
+        if api_connected:
+            st.success("FastAPI: Connected")
+        else:
+            st.warning("FastAPI: Optional")
+    
+    if db_connected and openai_connected:
+        st.info("Full Azure Stack Ready: Natural Language → SQL → Results")
     elif db_connected:
-        st.info("📊 Using direct database connection")
+        st.warning("Limited functionality: Database only (no AI processing)")
     else:
-        st.warning("⚠️ Limited functionality - No backend connection")
+        st.error("No database connection available")
     
 
-    # Speech-to-text uploader
-    st.subheader("🎤 Voice Query (Speech-to-Text)")
-    audio_file = st.file_uploader("Upload a .wav file for voice query", type=["wav"], key="voice_query_upload")
-    transcribed_text = ""
-    if audio_file:
-        files = {"file": audio_file}
-        try:
-            response = requests.post("http://127.0.0.1:8080/speech-to-text", files=files, timeout=30)
-            if response.status_code == 200:
-                transcribed_text = response.json().get("text", "")
-                st.success(f"Transcribed Text: {transcribed_text}")
-                # Option to use transcribed text as query
-                if st.button("Use as Query"):
-                    st.session_state.current_query = transcribed_text
-            else:
-                st.error(f"Speech-to-text API error: {response.status_code}")
-        except Exception as e:
-            st.error(f"Speech-to-text request failed: {str(e)}")
+    # Speech-to-text direct recording using Azure Speech Service
+    st.subheader("Voice Query (Speech-to-Text)")
+    st.info("Click the microphone button below to record your voice query directly")
+    
+    # Initialize session state for audio processing
+    if 'last_audio_hash' not in st.session_state:
+        st.session_state.last_audio_hash = None
+    if 'transcribed_text' not in st.session_state:
+        st.session_state.transcribed_text = ""
+    
+    # Direct voice recording
+    audio_data = st.audio_input("Record your voice query", key="voice_query_record")
+    
+    if audio_data:
+        # Create hash of audio data to detect if it's new
+        import hashlib
+        # Read the audio data as bytes for hashing
+        audio_bytes = audio_data.read()
+        audio_data.seek(0)  # Reset file pointer for later use
+        audio_hash = hashlib.md5(audio_bytes).hexdigest()
+        
+        # Only process if this is new audio
+        if st.session_state.get('last_audio_hash') != audio_hash:
+            st.session_state.last_audio_hash = audio_hash
+            
+            # Use Azure Speech Service for transcription
+            try:
+                from azure_speech import transcribe_audio
+                
+                with st.spinner("Transcribing your voice with Azure Speech Service..."):
+                    transcribed_text = transcribe_audio(audio_data)
+                    
+                if transcribed_text and not transcribed_text.startswith("Error") and not transcribed_text.startswith("Azure Speech Service not available"):
+                    st.session_state.transcribed_text = transcribed_text
+                    st.success(f"Transcribed Text: {transcribed_text}")
+                    
+                    # Auto-populate the query field
+                    if transcribed_text.strip():
+                        st.session_state.query_input = transcribed_text
+                        st.info("Voice query has been automatically loaded. You can edit it below if needed.")
+                else:
+                    st.error(f"Speech recognition failed: {transcribed_text}")
+                    
+            except ImportError:
+                st.error("Azure Speech Service not available. Please check installation.")
+            except Exception as e:
+                st.error(f"Speech recognition error: {str(e)}")
+                    
+            except Exception as e:
+                st.error(f"Speech-to-text request failed: {str(e)}")
+        
+        # Show the transcribed text if available
+        if st.session_state.transcribed_text:
+            st.success(f"Transcribed Text: **{st.session_state.transcribed_text}**")
+            st.info("Voice query has been automatically loaded. You can edit it below if needed.")
 
     # Text input for queries
     query = st.text_input(
@@ -325,42 +477,57 @@ def ask_page(selected_schemes):
             'timestamp': datetime.now(),
             'query': query,
             'response': None,
-            'source': 'api' if api_connected else 'db'
+            'source': 'azure_openai'
         })
         
-        # Get response
-        with st.spinner("Querying database..."):
-            response = None
+        # Get response using Azure OpenAI + Azure SQL
+        with st.spinner("Converting natural language to SQL..."):
+            # Step 1: Convert natural language to SQL using Azure OpenAI
+            openai_result = natural_language_to_sql(query, show_reasoning=True)
             
-            if api_connected:
-                # Use FastAPI backend
-                api_response = query_api_backend(query)
-                if api_response and api_response.get('success'):
-                    response = {
-                        'summary': api_response.get('summary', 'Query executed successfully'),
-                        'data': pd.DataFrame(api_response.get('data', [])),
-                        'sql': api_response.get('sql', ''),
-                        'chart_type': api_response.get('chart_type', 'table')
-                    }
-                else:
-                    st.error("Failed to get response from API backend")
-                    st.session_state.chat_history.pop()
-                    
-            elif db_connected:
-                # Fallback to direct database connection
-                try:
-                    db = get_database()
-                    response = db.natural_language_query(query)
-                    st.session_state.chat_history[-1]['response'] = response
-                except Exception as e:
-                    st.error(f"Database query failed: {str(e)}")
-                    st.session_state.chat_history.pop()
-            else:
-                st.warning("No backend connection available. Please start the FastAPI server or configure database connection.")
+            if "error" in openai_result:
+                st.error(f"OpenAI Error: {openai_result['error']}")
                 st.session_state.chat_history.pop()
-            
-            if response:
-                st.session_state.chat_history[-1]['response'] = response
+            else:
+                sql_query = openai_result.get('sql_query', '')
+                explanation = openai_result.get('explanation', 'Query executed')
+                
+                st.info(f"Generated SQL: `{sql_query}`")
+                
+                # Step 2: Execute the SQL query against Azure SQL Database
+                with st.spinner("Executing SQL query..."):
+                    try:
+                        query_result = execute_query(sql_query)
+                        
+                        if query_result:
+                            # Convert to DataFrame for display
+                            df = pd.DataFrame(query_result)
+                            
+                            response = {
+                                'summary': f"✅ {explanation}. Found {len(df)} results.",
+                                'data': df,
+                                'sql': sql_query,
+                                'chart_type': 'table',
+                                'openai_explanation': explanation
+                            }
+                            
+                            st.session_state.chat_history[-1]['response'] = response
+                            st.success(f"Query executed successfully! {len(df)} results found.")
+                            
+                        else:
+                            st.warning("Query executed but returned no results.")
+                            response = {
+                                'summary': f"✅ {explanation}. No results found.",
+                                'data': pd.DataFrame(),
+                                'sql': sql_query,
+                                'chart_type': 'table',
+                                'openai_explanation': explanation
+                            }
+                            st.session_state.chat_history[-1]['response'] = response
+                            
+                    except Exception as e:
+                        st.error(f"SQL Execution Error: {str(e)}")
+                        st.session_state.chat_history.pop()
     
     # Display query results
     st.subheader("� Query Results")
@@ -376,23 +543,27 @@ def ask_page(selected_schemes):
                 st.write(chat['response']['summary'])
             
             # Query details
-            with st.expander("📊 View Details", expanded=(i == 0)):
+            with st.expander("View Details", expanded=(i == 0)):
                 # Tabs for different views
-                tab1, tab2, tab3 = st.tabs(["📋 Table", "📈 Chart", "💾 SQL"])
+                tab1, tab2, tab3 = st.tabs(["Table", "Chart", "SQL"])
                 
                 with tab1:
                     if not chat['response']['data'].empty:
                         st.dataframe(chat['response']['data'], use_container_width=True)
                         
-                        # Download options
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            csv = chat['response']['data'].to_csv(index=False)
-                            st.download_button("📄 Download CSV", csv, f"query_result_{i}.csv", "text/csv")
-                        with col2:
-                            buffer = BytesIO()
-                            chat['response']['data'].to_excel(buffer, index=False)
-                            st.download_button("📊 Download Excel", buffer.getvalue(), f"query_result_{i}.xlsx")
+                        # Download options - only for users with export permission
+                        if can_export_data():
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                csv = chat['response']['data'].to_csv(index=False)
+                                st.download_button("Download CSV", csv, f"query_result_{i}.csv", "text/csv")
+                            with col2:
+                                buffer = BytesIO()
+                                chat['response']['data'].to_excel(buffer, index=False, engine='openpyxl')
+                                buffer.seek(0)  # Reset buffer position
+                                st.download_button("Download Excel", buffer.getvalue(), f"query_result_{i}.xlsx")
+                        else:
+                            st.info("Data export requires analyst or admin role. Contact your administrator for access.")
                 
                 with tab2:
                     if not chat['response']['data'].empty:
@@ -412,11 +583,18 @@ def ask_page(selected_schemes):
                 
                 with tab3:
                     st.code(chat['response']['sql'], language='sql')
+                    # Show OpenAI explanation if available
+                    if 'openai_explanation' in chat['response']:
+                        st.info(f"AI Explanation: {chat['response']['openai_explanation']}")
                 
                 # Query information
                 with st.expander("ℹ️ Query Information"):
                     source = chat.get('source', 'db')
-                    if source == 'api':
+                    if source == 'azure_openai':
+                        st.write("**Data Source:** Azure SQL Database")
+                        st.write("**AI Processing:** Azure OpenAI Service")
+                        st.write("**Query Type:** Natural Language → SQL")
+                    elif source == 'api':
                         st.write("**Data Source:** FastAPI Backend")
                         st.write("**Processing:** Enhanced AI Query Processing")
                     else:
@@ -426,21 +604,20 @@ def ask_page(selected_schemes):
                     st.write(f"**Timestamp:** {chat['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
 
 def reports_page():
-    st.header("📊 Reports & Dashboards")
+    st.header("Reports & Dashboards")
     
     # Get real data if database is connected
     db = get_database()
-    if st.session_state.get('db_connected', False):
+    if db is not None and st.session_state.get('db_connected', False):
         try:
-            # Load real metrics from database
+            # Load real metrics from database using new methods
             total_citizens = db.get_citizens_count()
+            total_disbursements = db.get_total_disbursements()
+            active_schemes = db.get_active_schemes_count()
+            total_enrollments = db.get_total_enrollments()
+            
             schemes_real = db.get_schemes()
             disbursements_real = db.get_disbursements_summary()
-            
-            # Calculate metrics
-            total_enrollments = schemes_real['total_enrollments'].sum() if not schemes_real.empty else 0
-            total_disbursements = schemes_real['total_disbursements'].sum() if not schemes_real.empty else 0
-            active_schemes = len(schemes_real) if not schemes_real.empty else 0
             
             # KPI Cards with real data
             col1, col2, col3, col4 = st.columns(4)
@@ -457,14 +634,13 @@ def reports_page():
             with col4:
                 st.metric("Total Enrollments", f"{total_enrollments:,}", "Real Data")
             
-            st.success("📊 Displaying real-time data from connected database")
+            st.success("Displaying real-time data from connected database")
             
             # Use real data for charts
             chart_data = schemes_real if not schemes_real.empty else schemes_data
             
         except Exception as e:
-            st.error(f"Error loading real data: {str(e)}")
-            # Fall back to sample data
+            # Fall back to sample data silently
             chart_data = schemes_data
             
             # KPI Cards with sample data
@@ -484,7 +660,7 @@ def reports_page():
             with col4:
                 st.metric("Beneficiaries", "300", "↗️ +25")
             
-            st.info("📊 Displaying sample data. Connect to database for real-time metrics.")
+            st.info("Displaying sample data. Connect to database for real-time metrics.")
     else:
         # Sample data KPIs
         col1, col2, col3, col4 = st.columns(4)
@@ -503,7 +679,7 @@ def reports_page():
         with col4:
             st.metric("Beneficiaries", "300", "↗️ +25")
         
-        st.info("📊 Displaying sample data. Connect to database for real-time metrics.")
+        st.info("Displaying sample data. Connect to database for real-time metrics.")
         chart_data = schemes_data
     
     st.divider()
@@ -512,30 +688,30 @@ def reports_page():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("📈 Scheme Comparison")
+        st.subheader("Scheme Comparison")
         enrollments_col = 'total_enrollments' if 'total_enrollments' in chart_data.columns else 'enrollments'
         if enrollments_col in chart_data.columns:
-            fig = px.bar(chart_data, x='name', y=enrollments_col, title="Enrollments by Scheme")
+            fig = px.bar(chart_data, x='scheme_name', y=enrollments_col, title="Enrollments by Scheme")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Enrollment data not available")
     
     with col2:
-        st.subheader("🥧 Disbursement Distribution")
+        st.subheader("Disbursement Distribution")
         disbursement_col = 'total_disbursements' if 'total_disbursements' in chart_data.columns else 'disbursements'
         if disbursement_col in chart_data.columns:
-            fig = px.pie(chart_data, names='name', values=disbursement_col, title="Disbursements by Scheme")
+            fig = px.pie(chart_data, names='scheme_name', values=disbursement_col, title="Disbursements by Scheme")
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("Disbursement data not available")
     
     # Export dashboard
-    if st.button("📥 Export Dashboard"):
+    if st.button("Export Dashboard"):
         st.success("Dashboard export feature will be implemented")
     
     # Add citizen search section
     st.divider()
-    st.subheader("🔍 Citizen Search")
+    st.subheader("Citizen Search")
     
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -561,22 +737,20 @@ def reports_page():
             st.warning("Database not connected. Please configure database connection to search citizens.")
 
 def database_page():
-    if st.session_state.user_role not in ['Analyst', 'Admin']:
-        st.error("Access denied. This page is only available for Analysts and Admins.")
+    # Check if user has database access using RBAC system
+    if not rbac.check_feature_access('database_query'):
+        st.error("Access denied. This page requires database query permissions.")
+        rbac.require_feature_access('database_query')
         return
     
-    st.header("🗄️ Database Explorer")
+    st.header("Database Explorer")
     
-    # Check database connection
-    if not st.session_state.get('db_connected', False):
-        st.warning("⚠️ Database not connected. Please configure your database connection first.")
-        if st.button("Go to Database Configuration"):
-            st.session_state.current_page = "Database Config"
-            st.rerun()
+    # Check if database is connected globally
+    if not st.session_state.get('global_db_connected', False):
+        st.error("Database connection failed. Please check your Azure SQL Database credentials.")
         return
     
-    db = get_database()
-    
+    # Use Azure connection instead of old database module
     # Get list of tables from database
     try:
         tables_query = """
@@ -585,9 +759,9 @@ def database_page():
         WHERE TABLE_TYPE = 'BASE TABLE' 
         ORDER BY TABLE_NAME
         """
-        tables_result = db.execute_query(tables_query)
-        if tables_result is not None and not tables_result.empty:
-            available_tables = tables_result['TABLE_NAME'].tolist()
+        tables_result = execute_query(tables_query)
+        if tables_result:
+            available_tables = [row['TABLE_NAME'] for row in tables_result]
         else:
             available_tables = ['citizens', 'schemes', 'enrollments', 'disbursements', 'officers', 'states', 'districts', 'villages']
     except Exception as e:
@@ -598,16 +772,16 @@ def database_page():
     col1, col2 = st.columns([1, 3])
     
     with col1:
-        st.subheader("📋 Database Tables")
+        st.subheader("Database Tables")
         if available_tables:
             selected_table = st.selectbox("Select Table", available_tables)
             
             # Show table count
             try:
                 count_query = f"SELECT COUNT(*) as row_count FROM [{selected_table}]"
-                count_result = db.execute_query(count_query)
-                if count_result is not None and not count_result.empty:
-                    row_count = count_result['row_count'].iloc[0]
+                count_result = execute_query(count_query)
+                if count_result:
+                    row_count = count_result[0]['row_count']
                     st.metric("Total Rows", f"{row_count:,}")
             except Exception as e:
                 st.error(f"Error counting rows: {str(e)}")
@@ -616,41 +790,50 @@ def database_page():
             return
     
     with col2:
-        st.subheader(f"📊 Table: {selected_table}")
+        st.subheader(f"Table: {selected_table}")
         
         # Add controls for data viewing
         col2a, col2b = st.columns([2, 1])
         with col2a:
             limit = st.selectbox("Show rows:", [10, 25, 50, 100, 500], index=1)
         with col2b:
-            if st.button("🔄 Refresh Data"):
+            if st.button("Refresh Data"):
                 st.cache_data.clear()
         
         # Show table data
         try:
             # Get table data with limit
             data_query = f"SELECT TOP {limit} * FROM [{selected_table}] ORDER BY 1"
-            table_data = db.execute_query(data_query)
+            table_data = execute_query(data_query)
             
-            if table_data is not None and not table_data.empty:
-                st.dataframe(table_data, use_container_width=True, height=400)
+            if table_data:
+                # Convert to DataFrame for display
+                import pandas as pd
+                df = pd.DataFrame(table_data)
+                st.dataframe(df, use_container_width=True, height=400)
                 
-                # Download option
-                csv = table_data.to_csv(index=False)
-                st.download_button(
-                    label=f"📥 Download {selected_table} data",
-                    data=csv,
-                    file_name=f"{selected_table}_data.csv",
-                    mime="text/csv"
-                )
+                # Download option - only for users with export permission
+                if can_export_data():
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label=f"Download {selected_table} data",
+                        data=csv,
+                        file_name=f"{selected_table}_data.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.info("Data export requires analyst or admin role.")
             else:
                 st.info(f"No data found in {selected_table} table")
                 
         except Exception as e:
             st.error(f"Error loading table data: {str(e)}")
+                
+        except Exception as e:
+            st.error(f"Error loading table data: {str(e)}")
         
         # Table schema information
-        with st.expander("🔍 Table Schema"):
+        with st.expander("Table Schema"):
             try:
                 schema_query = f"""
                 SELECT 
@@ -662,16 +845,18 @@ def database_page():
                 WHERE TABLE_NAME = '{selected_table}'
                 ORDER BY ORDINAL_POSITION
                 """
-                schema_result = db.execute_query(schema_query)
-                if schema_result is not None and not schema_result.empty:
-                    st.dataframe(schema_result, use_container_width=True)
+                schema_result = execute_query(schema_query)
+                if schema_result:
+                    import pandas as pd
+                    schema_df = pd.DataFrame(schema_result)
+                    st.dataframe(schema_df, use_container_width=True)
                 else:
                     st.info("Schema information not available")
             except Exception as e:
                 st.error(f"Error loading schema: {str(e)}")
         
         # Table relationships
-        with st.expander("🔗 Relationships"):
+        with st.expander("Relationships"):
             try:
                 fk_query = f"""
                 SELECT 
@@ -684,9 +869,11 @@ def database_page():
                 WHERE OBJECT_NAME(f.parent_object_id) = '{selected_table}'
                    OR OBJECT_NAME(f.referenced_object_id) = '{selected_table}'
                 """
-                fk_result = db.execute_query(fk_query)
-                if fk_result is not None and not fk_result.empty:
-                    st.dataframe(fk_result, use_container_width=True)
+                fk_result = execute_query(fk_query)
+                if fk_result:
+                    import pandas as pd
+                    fk_df = pd.DataFrame(fk_result)
+                    st.dataframe(fk_df, use_container_width=True)
                 else:
                     st.info("No foreign key relationships found")
             except Exception as e:
@@ -694,7 +881,7 @@ def database_page():
     
     # Quick analytics section
     st.divider()
-    st.subheader("📈 Quick Analytics")
+    st.subheader("Quick Analytics")
     
     analytics_col1, analytics_col2, analytics_col3 = st.columns(3)
     
@@ -703,17 +890,19 @@ def database_page():
         if selected_table == 'citizens':
             try:
                 gender_query = "SELECT gender, COUNT(*) as count FROM citizens GROUP BY gender"
-                gender_data = db.execute_query(gender_query)
-                if gender_data is not None and not gender_data.empty:
-                    fig = px.pie(gender_data, names='gender', values='count', title="Citizens by Gender")
+                gender_data = execute_query(gender_query)
+                if gender_data:
+                    import pandas as pd
+                    gender_df = pd.DataFrame(gender_data)
+                    fig = px.pie(gender_df, names='gender', values='count', title="Citizens by Gender")
                     st.plotly_chart(fig, use_container_width=True)
             except:
                 st.info("Gender distribution chart not available")
         elif selected_table == 'schemes':
             try:
                 sector_query = "SELECT sector, COUNT(*) as count FROM schemes GROUP BY sector"
-                sector_data = db.execute_query(sector_query)
-                if sector_data is not None and not sector_data.empty:
+                sector_data = execute_query(sector_query)
+                if sector_data:
                     fig = px.bar(sector_data, x='sector', y='count', title="Schemes by Sector")
                     st.plotly_chart(fig, use_container_width=True)
             except:
@@ -730,13 +919,14 @@ def database_page():
             for table in tables_to_count:
                 try:
                     count_query = f"SELECT COUNT(*) as count FROM [{table}]"
-                    result = db.execute_query(count_query)
-                    if result is not None and not result.empty:
-                        counts.append({'Table': table, 'Count': result['count'].iloc[0]})
+                    result = execute_query(count_query)
+                    if result:
+                        counts.append({'Table': table, 'Count': result[0]['count']})
                 except:
                     continue
             
             if counts:
+                import pandas as pd
                 counts_df = pd.DataFrame(counts)
                 st.dataframe(counts_df, use_container_width=True)
         except:
@@ -764,86 +954,179 @@ def database_page():
             st.info("Data quality metrics not available")
 
 def admin_page():
-    if not require_auth(['Admin']):
-        st.error("Access denied. This page is only available for Admins.")
+    """Admin page with Auth0 integration and RBAC"""
+    # Require admin role
+    if not is_admin():
+        st.error("**Access Denied**: Administrator role required")
+        st.info("Contact your system administrator to request admin access.")
         return
     
-    st.header("⚙️ Admin & User Management")
+    st.header("Admin & System Management")
+    
+    # Show current user info
+    user = get_current_user()
+    st.info(f"**Admin:** {user.get('name', 'Unknown')} ({user.get('email', 'No email')})")
     
     # Tab navigation for admin functions
-    tab1, tab2, tab3 = st.tabs(["👥 User Management", "📊 System Monitoring", "🔧 Settings"])
+    tab1, tab2, tab3, tab4 = st.tabs(["User Management", "Access Control", "System Monitoring", "Settings"])
     
     with tab1:
         st.subheader("User Management")
         
-        # User list
-        st.markdown("### Current Users")
-        users = list_users()
-        if users:
-            users_df = pd.DataFrame(users)
-            st.dataframe(users_df, use_container_width=True)
-        else:
-            st.info("No users found")
+        # Import auth_manager for user management functions
+        from in_app_auth import auth_manager
         
-        st.divider()
+        # User management sub-tabs
+        user_tab1, user_tab2, user_tab3 = st.tabs(["View Users", "Add User", "Edit Users"])
         
-        # Add new user
-        st.markdown("### Add New User")
-        with st.form("add_user_form"):
-            col1, col2 = st.columns(2)
+        with user_tab1:
+            st.markdown("### Current Users")
+            users = auth_manager.get_all_users()
             
-            with col1:
-                new_username = st.text_input("Username")
-                new_name = st.text_input("Full Name")
-                new_role = st.selectbox("Role", ["Officer", "Analyst", "Admin"])
+            if users:
+                # Create user table
+                user_data = []
+                for email, user_info in users.items():
+                    user_data.append({
+                        'Email': email,
+                        'Name': user_info.get('name', ''),
+                        'Roles': ', '.join(user_info.get('roles', [])),
+                        'Status': 'Active' if user_info.get('active', True) else 'Inactive',
+                        'Last Login': user_info.get('last_login', 'Never')[:19] if user_info.get('last_login') else 'Never',
+                        'Created': user_info.get('created_at', '')[:19] if user_info.get('created_at') else ''
+                    })
+                
+                df = pd.DataFrame(user_data)
+                st.dataframe(df, use_container_width=True)
+                
+                st.info(f"Total Users: {len(users)}")
+            else:
+                st.warning("No users found.")
+        
+        with user_tab2:
+            st.markdown("### Add New User")
             
-            with col2:
-                new_password = st.text_input("Password", type="password")
-                new_district = st.selectbox("District", districts_list)
-            
-            if st.form_submit_button("Add User", type="primary"):
-                if new_username and new_password and new_name:
-                    success, message = add_user(new_username, new_password, new_role, new_district, new_name)
-                    if success:
-                        st.success(message)
-                        st.rerun()
+            with st.form("add_user_form"):
+                new_email = st.text_input("Email Address", placeholder="user@company.com")
+                new_name = st.text_input("Full Name", placeholder="John Doe")
+                new_password = st.text_input("Password", type="password", placeholder="Minimum 8 characters")
+                confirm_password = st.text_input("Confirm Password", type="password")
+                
+                # Role selection
+                available_roles = ["admin", "analyst", "officer", "user"]
+                selected_roles = st.multiselect("Assign Roles", available_roles, default=["user"])
+                
+                # Role descriptions
+                st.markdown("""
+                **Role Descriptions:**
+                - **Admin**: Full system access, user management
+                - **Analyst**: Data analysis and querying capabilities  
+                - **Officer**: Welfare operations and citizen data access
+                - **User**: Basic access with limited permissions
+                """)
+                
+                submit_user = st.form_submit_button("Create User", type="primary")
+                
+                if submit_user:
+                    # Validation
+                    if not new_email or not new_name or not new_password:
+                        st.error("Please fill in all required fields")
+                    elif new_password != confirm_password:
+                        st.error("Passwords do not match")
+                    elif len(new_password) < 8:
+                        st.error("Password must be at least 8 characters long")
+                    elif not selected_roles:
+                        st.error("Please assign at least one role")
                     else:
-                        st.error(message)
-                else:
-                    st.error("Please fill in all required fields")
+                        success = auth_manager.create_user(new_email, new_password, new_name, selected_roles)
+                        if success:
+                            st.success(f"User {new_email} created successfully!")
+                            st.rerun()
+                        else:
+                            st.error("User already exists or creation failed")
         
-        st.divider()
-        
-        # Change password
-        st.markdown("### Change User Password")
-        with st.form("change_password_form"):
-            col1, col2 = st.columns(2)
+        with user_tab3:
+            st.markdown("### Edit Existing Users")
             
-            with col1:
-                target_username = st.selectbox("Select User", [user['username'] for user in users] if users else [])
-            
-            with col2:
-                new_password = st.text_input("New Password", type="password", key="change_pwd")
-            
-            if st.form_submit_button("Update Password"):
-                if target_username and new_password:
-                    success, message = update_user_password(target_username, new_password)
-                    if success:
-                        st.success(message)
-                    else:
-                        st.error(message)
-                else:
-                    st.error("Please select user and enter new password")
+            users = auth_manager.get_all_users()
+            if users:
+                # User selection
+                user_emails = list(users.keys())
+                selected_email = st.selectbox("Select User to Edit", user_emails)
+                
+                if selected_email:
+                    user_info = users[selected_email]
+                    
+                    # Edit form
+                    with st.form(f"edit_user_{selected_email}"):
+                        st.markdown(f"**Editing:** {selected_email}")
+                        
+                        edit_name = st.text_input("Full Name", value=user_info.get('name', ''))
+                        available_roles = ["admin", "analyst", "officer", "user"]
+                        current_roles = user_info.get('roles', [])
+                        edit_roles = st.multiselect("Roles", available_roles, default=current_roles)
+                        edit_active = st.checkbox("Active User", value=user_info.get('active', True))
+                        
+                        # Action buttons
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            update_user = st.form_submit_button("Update User", type="primary")
+                        
+                        with col2:
+                            reset_password = st.form_submit_button("Reset Password", type="secondary")
+                        
+                        with col3:
+                            delete_user = st.form_submit_button("Delete User", type="secondary")
+                        
+                        if update_user:
+                            success = auth_manager.update_user(selected_email, edit_name, edit_roles, edit_active)
+                            if success:
+                                st.success("User updated successfully!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to update user")
+                        
+                        if reset_password:
+                            new_temp_password = st.text_input("New Password", type="password", key="new_pwd")
+                            if new_temp_password:
+                                if len(new_temp_password) >= 8:
+                                    success = auth_manager.reset_user_password(selected_email, new_temp_password)
+                                    if success:
+                                        st.success("Password reset successfully!")
+                                    else:
+                                        st.error("Failed to reset password")
+                                else:
+                                    st.error("Password must be at least 8 characters long")
+                        
+                        if delete_user:
+                            if selected_email == auth_manager.get_current_user().get('email'):
+                                st.error("Cannot delete your own account!")
+                            else:
+                                # Confirmation
+                                if st.checkbox(f"I confirm deletion of {selected_email}", key="confirm_delete"):
+                                    success = auth_manager.delete_user(selected_email)
+                                    if success:
+                                        st.success("User deleted successfully!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to delete user")
+            else:
+                st.info("No users available to edit.")
     
     with tab2:
+        st.subheader("Role-Based Access Control")
+        show_access_control_panel()
+    
+    with tab3:
         st.subheader("System Monitoring")
         
         # Service health
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.metric("Database Status", "🟢 Connected" if st.session_state.get('db_connected') else "� Disconnected")
-            st.metric("Active Users", len(users) if users else 0)
+            st.metric("Database Status", "Connected" if st.session_state.get('db_connected') else "Disconnected")
+            st.metric("Auth0 Status", "Connected")
         
         with col2:
             st.metric("Total Queries Today", "47", "↗️ +12")
@@ -859,7 +1142,7 @@ def admin_page():
             'Time': ['10:45 AM', '10:32 AM', '10:18 AM', '10:05 AM'],
             'User': ['analyst', 'officer', 'admin', 'analyst'],
             'Action': ['Query: citizen count', 'Login', 'User added', 'Database export'],
-            'Status': ['✅ Success', '✅ Success', '✅ Success', '✅ Success']
+            'Status': ['Success', 'Success', 'Success', 'Success']
         })
         st.dataframe(activity_data, use_container_width=True)
     
@@ -890,25 +1173,25 @@ def admin_page():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("🧹 Clear All Sessions", type="secondary"):
+            if st.button("Clear All Sessions", type="secondary"):
                 st.info("All user sessions cleared")
             
-            if st.button("🗑️ Clear Chat History", type="secondary"):
+            if st.button("Clear Chat History", type="secondary"):
                 st.session_state.chat_history = []
                 st.success("Chat history cleared")
         
         with col2:
-            if st.button("📊 Generate System Report", type="secondary"):
+            if st.button("Generate System Report", type="secondary"):
                 st.info("System report generated")
             
-            if st.button("🔄 Restart Application", type="secondary"):
+            if st.button("Restart Application", type="secondary"):
                 st.warning("Application restart requested")
 
 def help_page():
-    st.header("❓ Help & About")
+    st.header("Help & About")
     
     # How to ask questions
-    st.subheader("💡 How to Ask Good Questions")
+    st.subheader("How to Ask Good Questions")
     st.write("""
     **Good examples:**
     - "How many citizens are enrolled in MGNREGA?"
@@ -924,7 +1207,7 @@ def help_page():
     st.divider()
     
     # Glossary
-    st.subheader("📚 Glossary")
+    st.subheader("Glossary")
     
     with st.expander("Welfare Schemes"):
         st.write("**MGNREGA:** Rural employment guarantee scheme")
@@ -941,9 +1224,8 @@ def help_page():
 
 # Main app logic
 def main():
-    # Check authentication first
-    if not is_authenticated():
-        show_login()
+    # Check in-app authentication first
+    if not require_in_app_authentication():
         return
     
     # Show API connection status popup
@@ -951,36 +1233,95 @@ def main():
     
     selected_schemes, selected_regions, date_from, date_to = create_sidebar()
     
-    # Navigation with database config for all users
-    page_options = {
-        "Officer": ["Query", "Reports", "Database Config", "Help"],
-        "Analyst": ["Query", "Reports", "Database Config", "Database", "Help"],
-        "Admin": ["Query", "Reports", "Database Config", "Database", "Admin", "Help"]
-    }
+    # Get current user for role-based navigation
+    current_user = get_current_user()
     
-    pages = page_options[st.session_state.user_role]
+    # Navigation with role-based access using RBAC system
+    available_pages = []
+    
+    # Basic pages available to all authenticated users
+    if rbac.check_feature_access('natural_language_query'):
+        available_pages.append("Query")
+    
+    if rbac.check_feature_access('view_reports'):
+        available_pages.append("Reports")
+    
+    # Advanced features based on permissions
+    if rbac.check_feature_access('database_query'):
+        available_pages.append("Database")
+    
+    # Admin-only features
+    if rbac.check_feature_access('user_management'):
+        available_pages.append("Admin")
+    
+    # Help is always available
+    available_pages.append("Help")
+    
+    # If no pages available, show access denied
+    if not available_pages:
+        st.error("No accessible features. Contact your administrator.")
+        return
     
     # Add connection status to navigation
-    db_status = "🟢 Connected" if st.session_state.get('db_connected', False) else "🔴 Not Connected"
-    api_status = "🟢 Connected" if st.session_state.get('api_connected', False) else "🔴 Disconnected"
+    db_status = "Connected" if st.session_state.get('db_connected', False) else "Not Connected"
+    api_status = "Connected" if st.session_state.get('api_connected', False) else "Disconnected"
     st.sidebar.markdown(f"**Database:** {db_status}")
     st.sidebar.markdown(f"**API Backend:** {api_status}")
     
-    selected_page = st.selectbox("Navigate to:", pages, label_visibility="collapsed")
+    selected_page = st.selectbox("Navigate to:", available_pages, label_visibility="collapsed")
     
-    # Page routing
+    # Page routing with role-based access control
     if selected_page == "Query":
-        ask_page(selected_schemes)
+        # Check if user can access natural language queries
+        if rbac.check_feature_access('natural_language_query'):
+            ask_page(selected_schemes)
+        else:
+            st.error("Access denied to Query feature")
+    
     elif selected_page == "Reports":
-        reports_page()
-    elif selected_page == "Database Config":
-        show_database_config()
+        if rbac.check_feature_access('view_reports'):
+            reports_page()  # Will implement this
+        else:
+            st.error("Access denied to Reports feature")
+    
     elif selected_page == "Database":
-        database_page()
+        if rbac.check_feature_access('database_query'):
+            database_page()  # Will implement this
+        else:
+            st.error("Access denied to Database feature")
+    
     elif selected_page == "Admin":
-        admin_page()
+        if rbac.check_feature_access('user_management'):
+            admin_page()
+        else:
+            st.error("Access denied to Admin panel")
+    
     elif selected_page == "Help":
-        help_page()
+        help_page()  # Will implement this
+
+def help_page():
+    """Help page"""
+    st.header("Help & Documentation")
+    st.markdown("""
+    ## Getting Started
+    
+    Welcome to the Public Welfare Assistant! This platform provides secure access to database analytics with AI-powered natural language queries.
+    
+    ### Features:
+    - **Natural Language Queries**: Ask questions in plain English
+    - **Role-Based Access**: Different permissions based on your role
+    - **Data Export**: Download results in CSV/Excel formats
+    - **Real-time Analytics**: Live data insights and visualizations
+    
+    ### User Roles:
+    - **Admin**: Full system access and user management
+    - **Analyst**: Data analysis and advanced querying
+    - **Viewer**: Read-only access to data and reports  
+    - **User**: Basic access with limited permissions
+    
+    ### Support:
+    For technical support or questions, contact your system administrator.
+    """)
 
 if __name__ == "__main__":
     main()

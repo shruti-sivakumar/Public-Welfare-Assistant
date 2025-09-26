@@ -45,7 +45,7 @@ class DatabaseManager:
 
         # SQLAlchemy needs spaces in driver replaced with +
         driver_url = driver.replace(' ', '+')
-        # NO curly braces, NO extra ?
+        
         return (
             f"mssql+pyodbc://{username}:{password}@{server}:1433/{database}"
             f"?driver={driver_url}&Encrypt=yes&TrustServerCertificate=no&Connection+Timeout=30"
@@ -83,7 +83,7 @@ class DatabaseManager:
             return
         try:
             with self.engine.connect() as conn:
-                # Only create tables if missing, do not insert any data
+                
                 citizens_table = """
                 CREATE TABLE IF NOT EXISTS citizens (
                     citizen_id INTEGER PRIMARY KEY,

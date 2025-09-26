@@ -16,7 +16,7 @@ import time
 import os
 from datetime import datetime
 import azure.cognitiveservices.speech as speechsdk
-from backend.db import execute_sql
+from db import execute_sql
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -29,9 +29,9 @@ client = AzureOpenAI(
 
 
 # Import routes
-from backend.routes.query import router as query_router
-from backend.routes.verify import router as verify_router
-from backend.routes.summary import router as summary_router
+from routes.query import router as query_router
+from routes.verify import router as verify_router
+from routes.summary import router as summary_router
 
 # Configure logging
 logging.basicConfig(
@@ -298,7 +298,7 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(),
         "uptime": "Running",
         "environment": os.getenv("ENVIRONMENT", "development"),
-        "database": "Connected",  # This could be enhanced with actual DB check
+        "database": "Connected",  
         "api_docs": "/docs"
     }
 

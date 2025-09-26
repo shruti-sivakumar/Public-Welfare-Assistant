@@ -1,0 +1,62 @@
+{
+  "admin@company.com": {
+    "password_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
+    "name": "System Administrator",
+    "roles": [
+      "admin"
+    ],
+    "created_at": "2025-09-17T23:30:00.000000",
+    "last_login": "2025-09-25T15:45:10.420837",
+    "active": true
+  },
+  "analyst@company.com": {
+    "password_hash": "20249749412d73a3f5799f6f1dcf910e7b4aa3ce4de133b1f8a63c044792a4e9",
+    "name": "Data Analyst",
+    "roles": [
+      "analyst"
+    ],
+    "created_at": "2025-09-17T23:30:00.000000",
+    "last_login": null,
+    "active": true
+  },
+  "officer@company.com": {
+    "password_hash": "118b8d35a17bcf2c7d2d790509e12308dc6332c5d234f0098d2d6be6700bebb1",
+    "name": "Welfare Officer",
+    "roles": [
+      "officer"
+    ],
+    "created_at": "2025-09-17T23:30:00.000000",
+    "last_login": null,
+    "active": true
+  },
+  "user@company.com": {
+    "password_hash": "e606e38b0d8c19b24cf0ee3808183162ea7cd63ff7912dbb22b5e803286b4446",
+    "name": "Basic User",
+    "roles": [
+      "user"
+    ],
+    "created_at": "2025-09-17T23:30:00.000000",
+    "last_login": "2025-09-19T11:48:22.431149",
+    "active": true
+  },
+  "vida123@gmail.com": {
+    "password_hash": "1be34d6e2996fb352ac33611c6fc94cff378c6a683f411e8cd5909f92b7831d6",
+    "name": "Vida",
+    "roles": [
+      "admin"
+    ],
+    "created_at": "2025-09-19T11:33:14.887058",
+    "last_login": "2025-09-19T11:33:33.769961",
+    "active": true
+  },
+  "vida@gmail.com": {
+    "password_hash": "cdb9f45f875f487f513d7c0347a01e6df4f35078fe82b2a5f4b7567ac11dbdf2",
+    "name": "Vida",
+    "roles": [
+      "user"
+    ],
+    "created_at": "2025-09-22T11:25:33.006512",
+    "last_login": "2025-09-22T11:25:59.448340",
+    "active": true
+  }
+}

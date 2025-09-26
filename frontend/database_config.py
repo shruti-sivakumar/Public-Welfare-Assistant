@@ -3,7 +3,7 @@ from frontend.database import get_database
 
 def show_database_config():
     """Display database configuration page"""
-    st.title("🗄️ Database Configuration")
+    st.title("Database Configuration")
     
     db = get_database()
     
@@ -78,7 +78,7 @@ def show_database_config():
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔄 Refresh Connection"):
+            if st.button("Refresh Connection"):
                 # Force reconnection
                 db.disconnect()
                 if db.connect():
@@ -97,7 +97,7 @@ def show_database_config():
         st.info("Please configure and test your database connection above.")
     
     # Database setup instructions
-    with st.expander("📚 Database Setup Instructions"):
+    with st.expander("Database Setup Instructions"):
         st.markdown("""
         ### Setting up your SQL Server Database:
         
