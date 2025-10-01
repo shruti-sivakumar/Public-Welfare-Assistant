@@ -37,7 +37,8 @@ def get_azure_connection():
             f"PWD={password};"
             "Encrypt=yes;"
             "TrustServerCertificate=yes;"
-            "Connection Timeout=30;"
+            "Connection Timeout=60;"
+            "Login Timeout=60;"
         )
         
         connection = pyodbc.connect(connection_string)

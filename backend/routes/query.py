@@ -9,11 +9,15 @@ import logging
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.db import execute_sql, test_db_connection
-from backend.prompt_engine import convert_to_sql, get_sample_queries
-from backend.auth import verify_token, check_permission
+# Add parent directory to path for imports
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+from db import execute_sql, test_db_connection
+from prompt_engine import PromptEngine
+from auth import verify_token, check_permission
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -29,7 +33,7 @@ class SqlRequest(BaseModel):
     sql_query: str
 
 @router.post("/query")
-async def process_query(
+async def query_endpoint(
     request: QueryRequest,
     token: Optional[str] = Header(None, alias="Authorization")
 ):
@@ -44,14 +48,14 @@ async def process_query(
             auth_result = verify_token(clean_token)
             if auth_result["status"] != "success":
                 raise HTTPException(status_code=401, detail="Invalid authentication token")
-            
             # Check read permission
             if not check_permission(clean_token, "read"):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
-        
+
         # Convert natural language to SQL
-        sql_result = convert_to_sql(request.query)
-        
+        engine = PromptEngine()
+        sql_result = engine.process_query(request.query)
+
         if sql_result["status"] != "success":
             return JSONResponse(
                 status_code=400,
@@ -64,7 +68,7 @@ async def process_query(
                     "error_type": "query_conversion_failed"
                 }
             )
-        
+
         response_data = {
             "success": True,
             "status": "success",
@@ -74,7 +78,7 @@ async def process_query(
             "confidence": sql_result.get("confidence", 0.8),
             "chart_type": sql_result.get("chart_type", "table") if request.return_chart_suggestion else None
         }
-        
+
         # Execute SQL if requested
         if request.execute:
             # Test database connection first
@@ -91,10 +95,8 @@ async def process_query(
                         "error_type": "database_connection_failed"
                     }
                 )
-            
             # Execute the SQL query
             execution_result = execute_sql(sql_result["sql_query"])
-            
             response_data.update({
                 "execution_status": execution_result["status"],
                 "data": execution_result.get("data", []),
@@ -102,16 +104,13 @@ async def process_query(
                 "execution_time": execution_result.get("execution_time"),
                 "summary": f"Query executed successfully. Retrieved {execution_result.get('row_count', 0)} records."
             })
-            
             if execution_result["status"] != "success":
                 response_data.update({
                     "success": False,
                     "execution_error": execution_result.get("message", "SQL execution failed"),
                     "error_type": "sql_execution_failed"
                 })
-        
         return JSONResponse(content=response_data)
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -121,8 +120,7 @@ async def process_query(
             content={
                 "success": False,
                 "status": "error",
-                "message": f"Internal server error: {str(e)}",
-                "original_query": request.query,
+                "message": str(e),
                 "error_type": "internal_server_error"
             }
         )
@@ -137,7 +135,7 @@ async def process_query_get(
     Process natural language query via GET (backwards compatibility)
     """
     request = QueryRequest(query=question, execute=execute)
-    return await process_query(request, token)
+    return await query_endpoint(request, token)
 
 @router.get("/query/samples")
 async def get_query_samples():

@@ -131,9 +131,12 @@ def auto_connect_database():
 def check_api_connection():
     """Check if the FastAPI backend is running"""
     try:
-        response = requests.get("http://127.0.0.1:8080/health", timeout=30)
+        # Use Azure backend URL instead of localhost
+        backend_url = "https://welfare-app-anech0dsctemhwbq.centralindia-01.azurewebsites.net"
+        response = requests.get(f"{backend_url}/health", timeout=30)
         if response.status_code == 200:
             st.session_state.api_connected = True
+            st.session_state.backend_url = backend_url
             return True
     except Exception as e:
         st.session_state.api_connected = False
@@ -242,15 +245,15 @@ def create_sidebar():
             
             # Backend API Status
             try:
-                backend_url = st.session_state.get('backend_url', 'http://127.0.0.1:8080')
+                backend_url = st.session_state.get('backend_url', 'https://welfare-app-anech0dsctemhwbq.centralindia-01.azurewebsites.net')
                 response = requests.get(f"{backend_url}/health", timeout=2)
                 if response.status_code == 200:
                     st.success("FastAPI Backend Connected")
                     st.write(f"Backend URL: {backend_url}")
                 else:
-                    st.error("FastAPI Backend Connected")
+                    st.error("FastAPI Backend Not Connected")
             except:
-                st.error("FastAPI Backend Connected")
+                st.error("FastAPI Backend Not Connected")
             
             if st.button("Refresh Connection", type="secondary", key="sidebar_refresh"):
                 st.rerun()
@@ -450,8 +453,9 @@ def ask_page(selected_schemes):
     def query_api_backend(user_query):
         """Query the FastAPI backend"""
         try:
+            backend_url = st.session_state.get('backend_url', 'https://welfare-app-anech0dsctemhwbq.centralindia-01.azurewebsites.net')
             response = requests.post(
-                "http://127.0.0.1:8080/nl2sql",
+                f"{backend_url}/nl2sql",
                 json={"query": user_query},
                 timeout=10
             )
@@ -545,7 +549,7 @@ def ask_page(selected_schemes):
             # Query details
             with st.expander("View Details", expanded=(i == 0)):
                 # Tabs for different views
-                tab1, tab2, tab3 = st.tabs(["Table", "Chart", "SQL"])
+                tab1, tab2, tab3 = st.tabs(["Table", "SQL"])
                 
                 with tab1:
                     if not chat['response']['data'].empty:
@@ -566,22 +570,6 @@ def ask_page(selected_schemes):
                             st.info("Data export requires analyst or admin role. Contact your administrator for access.")
                 
                 with tab2:
-                    if not chat['response']['data'].empty:
-                        chart_type = chat['response']['chart_type']
-                        data = chat['response']['data']
-                        
-                        if chart_type == 'bar' and len(data.columns) >= 2:
-                            fig = px.bar(data, x=data.columns[0], y=data.columns[-1])
-                            st.plotly_chart(fig, use_container_width=True)
-                        elif chart_type == 'pie' and len(data.columns) >= 2:
-                            fig = px.pie(data, names=data.columns[0], values=data.columns[-1])
-                            st.plotly_chart(fig, use_container_width=True)
-                        elif chart_type == 'metric':
-                            st.metric(label="Result", value=data.iloc[0, 0])
-                        else:
-                            st.info("No chart available for this data type")
-                
-                with tab3:
                     st.code(chat['response']['sql'], language='sql')
                     # Show OpenAI explanation if available
                     if 'openai_explanation' in chat['response']:

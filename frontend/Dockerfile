@@ -1,4 +1,4 @@
-# Use official Python image
+# --- Dockerfile (Streamlit) ---
 FROM python:3.11-slim
 
 # Install system dependencies required for pyodbc and SQL Server
@@ -14,13 +14,18 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-COPY requirements.txt .
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+# copy app
 COPY . .
 
-EXPOSE 8000
+# Streamlit must listen on 0.0.0.0 and the Azure port
+ENV PORT=8501
+ENV WEBSITES_PORT=8501
 
-# Use port 8000 (same as local development)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# (Optional) turn off headless warning banners
+ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+EXPOSE 8501
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

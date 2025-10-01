@@ -7,8 +7,8 @@ from typing import Dict, Any
 import logging
 
 # Import our modules
-from backend.db import test_db_connection
-from backend.auth import verify_token
+from db import test_db_connection
+from auth import verify_token
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

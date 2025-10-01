@@ -34,21 +34,27 @@ class DatabaseManager:
         self.engine = None
         self.metadata = MetaData()
         self._initialize_engine()
-        self._create_tables_if_not_exist()
+        # self._create_tables_if_not_exist()  # Commented out to avoid SQL Server syntax issues
     
     def _build_connection_string(self) -> str:
+        from urllib.parse import quote_plus
+        
         server = os.getenv('AZURE_SQL_SERVER')
         database = os.getenv('AZURE_SQL_DATABASE')
         username = os.getenv('AZURE_SQL_USERNAME')
         password = os.getenv('AZURE_SQL_PASSWORD')
         driver = os.getenv('AZURE_SQL_DRIVER', 'ODBC Driver 18 for SQL Server')
 
+        # URL encode the password to handle special characters
+        encoded_password = quote_plus(password) if password else ""
+        encoded_username = quote_plus(username) if username else ""
+        
         # SQLAlchemy needs spaces in driver replaced with +
         driver_url = driver.replace(' ', '+')
         
         return (
-            f"mssql+pyodbc://{username}:{password}@{server}:1433/{database}"
-            f"?driver={driver_url}&Encrypt=yes&TrustServerCertificate=no&Connection+Timeout=30"
+            f"mssql+pyodbc://{encoded_username}:{encoded_password}@{server}:1433/{database}"
+            f"?driver={driver_url}&Encrypt=yes&TrustServerCertificate=yes&Connection+Timeout=60&Login+Timeout=60"
         )
 
 
@@ -56,6 +62,9 @@ class DatabaseManager:
     def _initialize_engine(self):
         """Initialize SQLAlchemy engine with proper configuration"""
         try:
+            # Log connection attempt for debugging
+            logger.info(f"Initializing database connection. Use local DB: {self.use_local_db}")
+            
             if self.use_local_db:
                 # SQLite configuration
                 self.engine = create_engine(
@@ -65,11 +74,23 @@ class DatabaseManager:
                 )
             else:
                 # Azure SQL configuration
+                logger.info(f"Creating Azure SQL Server engine with connection string: {self.connection_string[:50]}...")
+                
+                # Check if required environment variables are set
+                required_vars = ['AZURE_SQL_SERVER', 'AZURE_SQL_DATABASE', 'AZURE_SQL_USERNAME', 'AZURE_SQL_PASSWORD']
+                missing_vars = [var for var in required_vars if not os.getenv(var)]
+                if missing_vars:
+                    logger.error(f"Missing required environment variables: {missing_vars}")
+                    raise ValueError(f"Missing environment variables: {missing_vars}")
+                
                 self.engine = create_engine(
                     self.connection_string,
                     echo=os.getenv('DB_ECHO', 'false').lower() == 'true',
-                    pool_size=int(os.getenv('DB_POOL_SIZE', '10')),
-                    max_overflow=int(os.getenv('DB_MAX_OVERFLOW', '20'))
+                    pool_size=int(os.getenv('DB_POOL_SIZE', '5')),
+                    max_overflow=int(os.getenv('DB_MAX_OVERFLOW', '10')),
+                    pool_timeout=60,
+                    pool_recycle=3600,
+                    connect_args={"timeout": 60}
                 )
             
             logger.info("Database engine initialized successfully")
@@ -179,16 +200,34 @@ class DatabaseManager:
                 query_upper = query.strip().upper()
                 if query_upper.startswith('SELECT'):
                     # SELECT queries
-                    columns = result.keys()
                     rows = result.fetchall()
-                    data = [dict(zip(columns, row)) for row in rows]
+                    columns = list(result.keys())
+                    
+                    # Convert data with proper JSON serialization for Decimal and datetime
+                    data = []
+                    for row in rows:
+                        row_dict = {}
+                        for i, value in enumerate(row):
+                            column_name = columns[i]
+                            # Handle Decimal types
+                            if str(type(value).__name__) == 'Decimal':
+                                row_dict[column_name] = float(value)
+                            # Handle datetime types
+                            elif hasattr(value, 'isoformat'):
+                                row_dict[column_name] = value.isoformat()
+                            # Handle date types
+                            elif hasattr(value, 'strftime'):
+                                row_dict[column_name] = value.strftime('%Y-%m-%d')
+                            else:
+                                row_dict[column_name] = value
+                        data.append(row_dict)
                     
                     return {
                         "status": "success",
                         "message": f"Query executed successfully. {len(data)} rows returned.",
                         "data": data,
                         "row_count": len(data),
-                        "columns": list(columns)
+                        "columns": columns
                     }
                 else:
                     # INSERT, UPDATE, DELETE queries

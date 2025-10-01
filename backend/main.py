@@ -1,10 +1,10 @@
-
-import openai
-from openai import AzureOpenAI
 """
 FastAPI Backend for Data Interpreter Assistant with Voice
 Main application entry point with comprehensive configuration
 """
+print("FASTAPI CONTAINER STARTUP: main.py loaded")
+
+from openai import AzureOpenAI
 from fastapi import FastAPI, Request, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -22,42 +22,34 @@ load_dotenv()
 
 # Instantiate AzureOpenAI client
 client = AzureOpenAI(
-    api_key=os.getenv("AZURE_OPENAI_KEY"),
+    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"),
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
 )
 
 
-# Import routes
-from routes.query import router as query_router
-from routes.verify import router as verify_router
-from routes.summary import router as summary_router
-
-# Configure logging
+# Configure logging first
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# Import routes with error handling
+try:
+    from routes.query import router as query_router
+    from routes.verify import router as verify_router
+    from routes.summary import router as summary_router
+    routes_available = True
+except Exception as e:
+    logger.warning(f"Routes not available: {e}")
+    routes_available = False
+
 # Create FastAPI app with enhanced configuration
 
 app = FastAPI(
     title="Data Interpreter Assistant API",
     description="""
-@app.api_route("/test-openai", methods=["GET", "POST"])
-async def test_openai():
-    try:
-        prompt = "Say hello from Azure OpenAI."
-        response = client.chat.completions.create(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
-            messages=[{"role": "user", "content": prompt}]
-        )
-        message = response.choices[0].message.content
-        return {"result": message}
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return JSONResponse(status_code=500, content={"error": str(e)})
     Backend API for conversational data querying with voice support.
     
     ## Features
@@ -155,119 +147,43 @@ app.add_middleware(
         "http://localhost:3000",    # React dev server
         "http://127.0.0.1:3000",   # React alternative
         "http://localhost:8080",    # Alternative frontend
-        "http://127.0.0.1:8080"    # Alternative frontend
+        "http://127.0.0.1:8080",   # Alternative frontend
+        "https://welfare-frontend-app.azurewebsites.net",  # Deployed frontend
+        "*"  # Allow all origins for development (remove in production)
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
+# Include routers
+if routes_available:
+    app.include_router(query_router)
+    app.include_router(verify_router)
+    app.include_router(summary_router)
+    logger.info("All route modules loaded successfully")
+else:
+    logger.warning("Route modules not available - running with basic endpoints only")
+
 # Add request logging middleware
 @app.post("/nl2sql")
 async def nl2sql(request: Request):
     try:
-        load_dotenv()
-        openai.api_type = "azure"
-        openai.api_base = os.getenv("AZURE_OPENAI_ENDPOINT")
-        openai.api_key = os.getenv("AZURE_OPENAI_KEY")
-        openai.api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview")
-
+        from prompt_engine import PromptEngine
+        
         data = await request.json()
         nl_query = data.get("query")
-        prompt = f"Convert this to an SQL query: {nl_query}"
-
-        response = openai.ChatCompletion.create(
-            engine=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
-            messages=[{"role": "user", "content": prompt}]
-        )
-        sql_query = response.choices[0].message["content"]
-
-        result = execute_sql(sql_query)
-
-        import pandas as pd
-        if isinstance(result, pd.DataFrame):
-            result = result.to_dict(orient="records")
-        elif isinstance(result, pd.Series):
-            result = result.to_dict()
-
-        return {"sql_query": sql_query, "result": result}
+        
+        # Use the PromptEngine with proper schema context
+        engine = PromptEngine()
+        result = engine.process_query(nl_query)
+        
+        return result
+        
     except Exception as e:
         logging.error(f"NL2SQL error: {e}")
         import traceback; traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
-    # Hardcoded SQL queries for demo with plain text summaries
-    data = await request.json()
-    nl_query = data.get("query", "").lower()
-    summary = "Query executed successfully"
-    chart_type = "table"
-    sql_query = None
-    result = None
-    data_out = None
-    # Helper to extract data from execute_sql result
-    def extract_data(res):
-        if isinstance(res, dict) and "data" in res:
-            return res["data"]
-        return res
-    if "citizen count" in nl_query:
-        sql_query = "SELECT COUNT(*) as count FROM citizens"
-        result = execute_sql(sql_query)
-        data_out = extract_data(result)
-        count = None
-        # Try to extract count robustly from result dict
-        if isinstance(result, dict) and "data" in result and result["data"] and "count" in result["data"][0]:
-            count = result["data"][0]["count"]
-        elif isinstance(data_out, list) and data_out and "count" in data_out[0]:
-            count = data_out[0]["count"]
-        elif isinstance(data_out, dict) and "count" in data_out:
-            count = data_out["count"]
-        if count is not None:
-            summary = f"There are {count} citizens in the database."
-        else:
-            summary = f"Could not determine citizen count. Debug: {data_out}"
-    elif "list all schemes" in nl_query:
-        sql_query = "SELECT scheme_id, scheme_name, description FROM schemes"
-        result = execute_sql(sql_query)
-        data_out = extract_data(result)
-        num_schemes = 0
-        # Try to extract number of schemes robustly
-        if isinstance(result, dict) and "data" in result:
-            num_schemes = len(result["data"])
-        elif isinstance(data_out, list):
-            num_schemes = len(data_out)
-        elif isinstance(data_out, dict):
-            num_schemes = 1
-        if num_schemes > 0:
-            summary = f"There are {num_schemes} schemes available."
-        else:
-            summary = f"No schemes found. Debug: {data_out}"
-    elif "show disbursements" in nl_query:
-        sql_query = "SELECT * FROM disbursements"
-        result = execute_sql(sql_query)
-        data_out = extract_data(result)
-        num_disbursements = 0
-        # Try to extract number of disbursements robustly
-        if isinstance(result, dict) and "data" in result:
-            num_disbursements = len(result["data"])
-        elif isinstance(data_out, list):
-            num_disbursements = len(data_out)
-        elif isinstance(data_out, dict):
-            num_disbursements = 1
-        if num_disbursements > 0:
-            summary = f"There are {num_disbursements} disbursements recorded."
-        else:
-            summary = f"No disbursements found. Debug: {data_out}"
-    else:
-        sql_query = "SELECT 'Demo: No matching hardcoded query' as info"
-        result = execute_sql(sql_query)
-        data_out = extract_data(result)
-        summary = "No matching hardcoded query. Please try a different question."
-    return {
-        "success": True,
-        "sql_query": sql_query,
-        "data": data_out,
-        "summary": summary,
-        "chart_type": chart_type
-    }
 
 
 
@@ -333,9 +249,8 @@ if __name__ == "__main__":
     # Enhanced startup configuration
     logger.info("🚀 Starting Data Interpreter Assistant API...")
     uvicorn.run(
-        app, 
-        host="127.0.0.1", 
-        port=8080, 
-        reload=True,
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
         log_level="info"
     )

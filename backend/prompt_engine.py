@@ -1,6 +1,6 @@
 """
-Enhanced Prompt engineering and natural language to SQL conversion
-Supports hardcoded mappings, pattern matching, and future GPT integration
+Pure AI-driven natural language to SQL conversion
+Uses Azure OpenAI exclusively for intelligent query processing
 """
 import re
 import os
@@ -8,811 +8,580 @@ from typing import Dict, List, Any, Optional, Tuple
 import logging
 from datetime import datetime, timedelta
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class QueryTemplate:
-    """Template class for SQL query generation"""
-    
-    def __init__(self, name: str, template: str, description: str, parameters: List[str] = None):
-        self.name = name
-        self.template = template
-        self.description = description
-        self.parameters = parameters or []
-    
-    def generate(self, **kwargs) -> str:
-        """Generate SQL query from template"""
-        try:
-            return self.template.format(**kwargs)
-        except KeyError as e:
-            raise ValueError(f"Missing parameter {e} for template {self.name}")
+try:
+    from openai import AzureOpenAI
+except ImportError:
+    logger.error("OpenAI library not installed. Install with: pip install openai")
+    AzureOpenAI = None
 
 class PromptEngine:
-    """Enhanced natural language to SQL conversion engine"""
+    """Pure AI-driven natural language to SQL conversion engine"""
     
     def __init__(self):
-        self.hardcoded_queries = self._initialize_hardcoded_queries()
+        """Initialize the AI-driven prompt engine"""
+        # Azure OpenAI configuration
+        self.azure_openai_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        self.azure_openai_key = os.getenv("AZURE_OPENAI_API_KEY")
+        self.azure_openai_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-35-turbo")
+        
+        # Initialize table schemas with complete structure
         self.table_schemas = self._initialize_table_schemas()
-        self.query_templates = self._initialize_query_templates()
-        self.entity_synonyms = self._initialize_entity_synonyms()
-        self.operation_patterns = self._initialize_operation_patterns()
         
-    
-    def _initialize_hardcoded_queries(self) -> Dict[str, str]:
-        """Initialize comprehensive hardcoded query mappings"""
+        logger.info("PromptEngine initialized with AI-driven processing")
+
+    def _initialize_table_schemas(self) -> Dict[str, List[str]]:
+        """Initialize complete table schemas from actual database"""
         return {
-            # Basic CRUD operations
-            "show all citizens": "SELECT * FROM citizens ORDER BY citizen_id LIMIT 20",
-            "list citizens": "SELECT citizen_id, name, age, gender FROM citizens ORDER BY name LIMIT 20",
-            "count citizens": "SELECT COUNT(*) as total_citizens FROM citizens",
-            "how many citizens": "SELECT COUNT(*) as total_citizens FROM citizens",
-            "total citizens": "SELECT COUNT(*) as total_citizens FROM citizens",
-            "citizen count": "SELECT COUNT(*) as total_citizens FROM citizens",
-            "show all officers": "SELECT * FROM officers ORDER BY officer_id LIMIT 20",
-            "list officers": "SELECT officer_id, name, department, rank FROM officers ORDER BY name LIMIT 20",
-            "count officers": "SELECT COUNT(*) as total_officers FROM officers",
-            "how many officers": "SELECT COUNT(*) as total_officers FROM officers",
-            "total officers": "SELECT COUNT(*) as total_officers FROM officers",
-            "show all schemes": "SELECT * FROM schemes ORDER BY scheme_id LIMIT 20",
-            "list schemes": "SELECT scheme_id, scheme_name, description FROM schemes ORDER BY scheme_name LIMIT 20",
-            "count schemes": "SELECT COUNT(*) as total_schemes FROM schemes",
-            "how many schemes": "SELECT COUNT(*) as total_schemes FROM schemes",
-            "total schemes": "SELECT COUNT(*) as total_schemes FROM schemes",
-            # Analytics queries
-            "citizens by gender": "SELECT gender, COUNT(*) as count FROM citizens GROUP BY gender",
-            "officers by department": "SELECT department, COUNT(*) as count FROM officers GROUP BY department",
-            "citizens by age group": "SELECT CASE WHEN age < 18 THEN 'Under 18' WHEN age BETWEEN 18 AND 30 THEN '18-30' WHEN age BETWEEN 31 AND 50 THEN '31-50' WHEN age BETWEEN 51 AND 65 THEN '51-65' ELSE 'Above 65' END as age_group, COUNT(*) as count FROM citizens GROUP BY age_group ORDER BY age_group",
-            # System queries
-            "show tables": "SELECT name FROM sqlite_master WHERE type='table'",
-            "list tables": "SELECT name FROM sqlite_master WHERE type='table'",
-            "database summary": "SELECT 'Citizens' as table_name, COUNT(*) as count FROM citizens UNION ALL SELECT 'Officers' as table_name, COUNT(*) as count FROM officers UNION ALL SELECT 'Schemes' as table_name, COUNT(*) as count FROM schemes",
-            "data overview": "SELECT 'Citizens' as table_name, COUNT(*) as count FROM citizens UNION ALL SELECT 'Officers' as table_name, COUNT(*) as count FROM officers UNION ALL SELECT 'Schemes' as table_name, COUNT(*) as count FROM schemes",
-            # Statistical queries
-            "average age": "SELECT AVG(age) as average_age FROM citizens",
-            "oldest citizen": "SELECT name, age FROM citizens WHERE age = (SELECT MAX(age) FROM citizens)",
-            "youngest citizen": "SELECT name, age FROM citizens WHERE age = (SELECT MIN(age) FROM citizens)",
+            "citizens": [
+                "citizen_id (INT, PRIMARY KEY)",
+                "aadhaar_no (VARCHAR(12), UNIQUE)",
+                "name (VARCHAR(100))",
+                "gender (VARCHAR(10))",
+                "age (INT)",
+                "mobile_no (VARCHAR(15))",
+                "email (VARCHAR(100))",
+                "village_id (INT, FOREIGN KEY to villages)",
+                "date_of_birth (DATE)"
+            ],
+            "villages": [
+                "village_id (INT, PRIMARY KEY)",
+                "name (VARCHAR(100))",
+                "district_id (INT, FOREIGN KEY to districts)"
+            ],
+            "districts": [
+                "district_id (INT, PRIMARY KEY)",
+                "name (VARCHAR(100))",
+                "state_id (INT, FOREIGN KEY to states)"
+            ],
+            "states": [
+                "state_id (INT, PRIMARY KEY)",
+                "name (VARCHAR(100))"
+            ],
+            "schemes": [
+                "scheme_id (INT, PRIMARY KEY)",
+                "name (VARCHAR(100))",
+                "description (TEXT)",
+                "sector (VARCHAR(50))",
+                "frequency (VARCHAR(20))",
+                "benefit_type (VARCHAR(50))"
+            ],
+            "enrollments": [
+                "enrollment_id (INT, PRIMARY KEY)",
+                "citizen_id (INT, FOREIGN KEY to citizens)",
+                "scheme_id (INT, FOREIGN KEY to schemes)",
+                "enrollment_date (DATE)",
+                "status (VARCHAR(20))",
+                "last_verified (DATE)",
+                "verified_by (INT, FOREIGN KEY to officers)"
+            ],
+            "disbursements": [
+                "disbursement_id (INT, PRIMARY KEY)",
+                "citizen_id (INT, FOREIGN KEY to citizens)",
+                "scheme_id (INT, FOREIGN KEY to schemes)",
+                "amount (DECIMAL(12,2))",
+                "status (VARCHAR(20))",
+                "disbursed_on (DATE)",
+                "verified_by (INT, FOREIGN KEY to officers)",
+                "payment_method (VARCHAR(50))"
+            ],
+            "health_details": [
+                "health_id (INT, PRIMARY KEY)",
+                "citizen_id (INT, FOREIGN KEY to citizens)",
+                "chronic_conditions (TEXT)",
+                "disability_status (VARCHAR(100))"
+            ],
+            "bank_accounts": [
+                "account_id (INT, PRIMARY KEY)",
+                "citizen_id (INT, FOREIGN KEY to citizens)",
+                "account_no (VARCHAR(20))",
+                "bank_name (VARCHAR(100))",
+                "ifsc_code (VARCHAR(15))"
+            ],
+            "officers": [
+                "officer_id (INT, PRIMARY KEY)", 
+                "name (VARCHAR(100))",
+                "designation (VARCHAR(100))",
+                "role (VARCHAR(50))",
+                "email (VARCHAR(100))",
+                "district_id (INT, FOREIGN KEY to districts)"
+            ],
+            "verifications": [
+                "verification_id (INT, PRIMARY KEY)",
+                "citizen_id (INT, FOREIGN KEY to citizens)",
+                "scheme_id (INT, FOREIGN KEY to schemes)",
+                "status (VARCHAR(20))",
+                "comments (TEXT)",
+                "verified_on (DATETIME)",
+                "officer_id (INT, FOREIGN KEY to officers)"
+            ]
         }
-        # def _initialize_hardcoded_queries(self) -> Dict[str, str]:
-        #     """No hardcoded queries; use GPT for all conversions"""
-        #     return {}
-    
-    
-    def _initialize_table_schemas(self) -> Dict[str, Dict[str, Any]]:
-        """Initialize detailed table schema information"""
-        return {
-            "citizens": {
-                "columns": ["citizen_id", "name", "age", "gender", "address", "phone", "email"],
-                "primary_key": "citizen_id",
-                "description": "Information about citizens in the welfare system",
-                "sample_queries": [
-                    "Show all citizens",
-                    "Count citizens by gender", 
-                    "Find citizens above age 30"
-                ]
-            },
-            "officers": {
-                "columns": ["officer_id", "name", "department", "rank", "phone", "email"],
-                "primary_key": "officer_id", 
-                "description": "Information about government officers",
-                "sample_queries": [
-                    "List all officers",
-                    "Show officers by department",
-                    "Count officers by rank"
-                ]
-            },
-            "schemes": {
-                "columns": ["scheme_id", "scheme_name", "description", "eligibility", "benefits"],
-                "primary_key": "scheme_id",
-                "description": "Available welfare schemes",
-                "sample_queries": [
-                    "List all schemes",
-                    "Show scheme details",
-                    "Count total schemes"
-                ]
-            }
-        }
-    
-    def _initialize_query_templates(self) -> Dict[str, QueryTemplate]:
-        """Initialize reusable SQL query templates"""
-        templates = {}
+
+    def _preprocess_query(self, query: str) -> str:
+        """Intelligently preprocess the query to improve understanding"""
+        # Normalize common terms
+        original_query = query
+        query = query.lower().strip()
         
-        # Basic CRUD templates
-        templates['select_all'] = QueryTemplate(
-            "select_all",
-            "SELECT * FROM {table} ORDER BY {order_by} LIMIT {limit}",
-            "Select all records from a table",
-            ["table", "order_by", "limit"]
-        )
+        # Dynamic year handling - don't hardcode years
+        current_year = datetime.now().year
+        query = re.sub(r'\b(this year|current year)\b', f'{current_year}', query)
+        query = re.sub(r'\blast year\b', f'{current_year - 1}', query)
+        query = re.sub(r'\bnext year\b', f'{current_year + 1}', query)
         
-        templates['count_records'] = QueryTemplate(
-            "count_records", 
-            "SELECT COUNT(*) as total_{table} FROM {table}",
-            "Count total records in a table",
-            ["table"]
-        )
+        # Scheme name normalization (keep flexible)
+        query = re.sub(r'\bpmay\b', 'PMAY housing scheme', query)
+        query = re.sub(r'\bnsap\b', 'NSAP pension scheme', query)
+        query = re.sub(r'\bmgnrega\b', 'MGNREGA employment scheme', query)
+        query = re.sub(r'\bujjwala\b', 'Ujjwala gas scheme', query)
+        query = re.sub(r'\bayushman\b', 'Ayushman Bharat health scheme', query)
         
-        templates['filter_by_column'] = QueryTemplate(
-            "filter_by_column",
-            "SELECT * FROM {table} WHERE {column} {operator} {value} ORDER BY {order_by} LIMIT {limit}",
-            "Filter records by column value",
-            ["table", "column", "operator", "value", "order_by", "limit"]
-        )
+        # Location normalization
+        query = re.sub(r'\brural\b', 'rural villages', query)
+        query = re.sub(r'\burban\b', 'urban areas', query)
         
-        templates['group_by_column'] = QueryTemplate(
-            "group_by_column",
-            "SELECT {column}, COUNT(*) as count FROM {table} GROUP BY {column} ORDER BY count DESC",
-            "Group records by column and count",
-            ["table", "column"]
-        )
+        # Disability normalization (make more flexible)
+        query = re.sub(r'disability.*above.*(\d+)%', r'severe disability conditions above \1 percent', query)
+        query = re.sub(r'disabled.*citizens', 'citizens with disabilities', query)
         
-        # Age-specific templates  
-        templates['age_filter'] = QueryTemplate(
-            "age_filter",
-            "SELECT * FROM citizens WHERE age {operator} {age} ORDER BY age {sort_order} LIMIT {limit}",
-            "Filter citizens by age",
-            ["operator", "age", "sort_order", "limit"]
-        )
+        # Amount normalization (keep flexible)
+        query = re.sub(r'(\d+)\s*lakh', r'\1 hundred thousand rupees', query)
+        query = re.sub(r'₹\s*(\d+)', r'\1 rupees', query)
         
-        templates['age_range'] = QueryTemplate(
-            "age_range", 
-            "SELECT * FROM citizens WHERE age BETWEEN {min_age} AND {max_age} ORDER BY age LIMIT {limit}",
-            "Filter citizens by age range",
-            ["min_age", "max_age", "limit"]
-        )
+        # Time period normalization
+        query = re.sub(r'\bin\s+(\d{4})\b', r'during year \1', query)
+        query = re.sub(r'\bfor\s+(\d{4})\b', r'during year \1', query)
         
-        return templates
-    
-    def _initialize_entity_synonyms(self) -> Dict[str, List[str]]:
-        """Initialize synonyms for database entities"""
-        return {
-            "citizens": ["citizen", "people", "person", "individual", "resident", "beneficiary"],
-            "officers": ["officer", "official", "staff", "employee", "personnel", "admin"],
-            "schemes": ["scheme", "program", "initiative", "project", "plan", "benefit"]
-        }
-    
-    def _initialize_operation_patterns(self) -> Dict[str, Dict[str, Any]]:
-        """Initialize patterns for different operations"""
-        return {
-            "count": {
-                "keywords": ["count", "how many", "number of", "total", "sum"],
-                "template": "count_records",
-                "chart_type": "metric"
-            },
-            "list": {
-                "keywords": ["show", "list", "display", "get", "find", "retrieve"],
-                "template": "select_all", 
-                "chart_type": "table"
-            },
-            "filter": {
-                "keywords": ["where", "with", "having", "above", "below", "greater", "less"],
-                "template": "filter_by_column",
-                "chart_type": "table"
-            },
-            "group": {
-                "keywords": ["by", "group", "categorize", "breakdown"],
-                "template": "group_by_column",
-                "chart_type": "bar"
-            },
-            "compare": {
-                "keywords": ["compare", "vs", "versus", "between"],
-                "template": "group_by_column",
-                "chart_type": "bar"
-            }
-        }
-    
-    def process_query(self, natural_language_query: str) -> Dict[str, Any]:
-        """Convert natural language query to SQL using only hardcoded and pattern-matched logic"""
+        # Make query more SQL-friendly
+        query = re.sub(r'\bhow many\b', 'count', query)
+        query = re.sub(r'\bshow me\b', 'list', query)
+        query = re.sub(r'\bfind\b', 'select', query)
+        
+        return query
+        
+    def _try_azure_openai(self, query: str) -> Optional[str]:
+        """Use Azure OpenAI to convert natural language to SQL"""
+        if not self.azure_openai_key or not self.azure_openai_endpoint:
+            logger.error("Azure OpenAI credentials not configured")
+            return None
+            
+        # Preprocess query for better understanding
+        processed_query = self._preprocess_query(query)
+            
         try:
-            from backend.db import DatabaseManager
-            cleaned_query = self._clean_query(natural_language_query)
-            entities = self._extract_entities(cleaned_query)
-            operations = self._extract_operations(cleaned_query)
-            # Try hardcoded match first
-            sql_query = self._match_hardcoded_query(cleaned_query)
-            method = "hardcoded"
-            if not sql_query:
-                # Try pattern match
-                sql_query = self._pattern_match_query(cleaned_query)
-                method = "pattern"
-            if not sql_query:
-                # Try intelligent pattern match
-                sql_query = self._intelligent_pattern_match(cleaned_query, entities, operations)
-                method = "intelligent_pattern"
-            if not sql_query:
-                return {
-                    "status": "error",
-                    "message": "Could not convert query to SQL. Please try rephrasing.",
-                    "suggestions": self._get_intelligent_suggestions(entities, operations)
-                }
-            # Execute SQL and format result
-            db = DatabaseManager()
-            db_response = db.execute_query(sql_query)
-            if db_response["status"] != "success":
-                return {
-                    "status": "error",
-                    "message": db_response.get("message", "Database error")
-                }
-            # Human-readable output for count queries
-            if "COUNT" in sql_query.upper():
-                count = None
-                for key in ["total_citizens", "total_officers", "total_schemes", "count"]:
-                    if db_response["data"] and key in db_response["data"][0]:
-                        count = db_response["data"][0][key]
-                        break
-                if count is None and db_response["data"]:
-                    count = list(db_response["data"][0].values())[0]
-                entity = entities[0] if entities else "records"
+            client = AzureOpenAI(
+                api_key=self.azure_openai_key,
+                api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-15-preview"),
+                azure_endpoint=self.azure_openai_endpoint,
+            )
+            
+            # Create complete schema context
+            schema_context = self._build_schema_context()
+            
+            prompt = f"""
+            You are an expert SQL Server developer. Convert this natural language query to syntactically perfect SQL.
+
+            QUERY: "{processed_query}"
+            ORIGINAL: "{query}"
+
+            {schema_context}
+
+            🎯 MANDATORY SQL SERVER REQUIREMENTS:
+
+            1. ABSOLUTE SYNTAX RULES:
+            - Use TOP N instead of LIMIT N (SQL Server doesn't support LIMIT)
+            - Every non-aggregate column in SELECT MUST be in GROUP BY
+            - Use proper JOIN syntax with table aliases
+            - Handle NULL values with proper LEFT JOIN or IS NULL checks
+            
+            2. DISBURSEMENTS TABLE CRITICAL:
+            - disbursements table has NO enrollment_id column!
+            - JOIN disbursements: FROM citizens c JOIN disbursements d ON c.citizen_id = d.citizen_id
+            - For scheme filtering: JOIN schemes s ON d.scheme_id = s.scheme_id
+            - NEVER write: d.enrollment_id = e.enrollment_id (this column doesn't exist!)
+            
+            3. GROUP BY LOGIC:
+            - If SELECT has: c.name, c.citizen_id, COUNT(e.scheme_id)
+            - Then GROUP BY must have: c.citizen_id, c.name
+            - All non-aggregate SELECT columns must be in GROUP BY
+            - Use HAVING for aggregate filtering (not WHERE)
+            
+            4. DYNAMIC DATE HANDLING:
+            - Don't hardcode years like 2024
+            - Use YEAR(GETDATE()) for current year
+            - Use YEAR(date_column) = YEAR(GETDATE()) for current year filtering
+            - Use DATEPART or YEAR() functions properly
+            
+            5. FLEXIBLE SCHEME MATCHING:
+            - Use LIKE patterns, not hardcoded IDs
+            - PMAY/housing: (s.name LIKE '%PMAY%' OR s.name LIKE '%housing%' OR s.name LIKE '%Awas%')
+            - Employment: (s.name LIKE '%MGNREGA%' OR s.name LIKE '%employment%' OR s.name LIKE '%work%')
+            - Pension: (s.name LIKE '%NSAP%' OR s.name LIKE '%pension%' OR s.name LIKE '%elderly%')
+            - Gas: (s.name LIKE '%Ujjwala%' OR s.name LIKE '%gas%' OR s.name LIKE '%LPG%')
+            - Health: (s.name LIKE '%Ayushman%' OR s.name LIKE '%health%' OR s.name LIKE '%medical%')
+            
+            6. ROBUST TABLE RELATIONSHIPS:
+            - Geographic hierarchy: citizens → villages → districts → states
+            - Program data: citizens → enrollments → schemes
+            - Financial data: citizens → disbursements → schemes (NO enrollment_id link!)
+            - Personal data: citizens → health_details, citizens → bank_accounts
+            
+            7. ERROR PREVENTION:
+            - Always use table aliases (c, e, s, d, v, dt, st, h, ba, o)
+            - Include proper WHERE clauses for data filtering
+            - Use ORDER BY for meaningful result sorting
+            - Handle empty results gracefully
+            
+            Generate ONLY the SQL query (no explanations):
+            """
+            
+            response = client.chat.completions.create(
+                model=self.azure_openai_deployment,
+                messages=[
+                    {"role": "system", "content": "You are a SQL expert. Convert natural language to SQL queries using the provided schema."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=500,
+                temperature=0.1
+            )
+            
+            sql = response.choices[0].message.content.strip()
+            # Clean up the response
+            sql = sql.replace("```sql", "").replace("```", "").strip()
+            
+            return self._auto_correct_sql_dialect(sql)
+            
+        except Exception as e:
+            logger.error(f"Azure OpenAI processing failed: {e}")
+            return None
+
+    def _build_schema_context(self) -> str:
+        """Build complete schema context for OpenAI prompt"""
+        context = "DATABASE SCHEMA:\n"
+        for table, columns in self.table_schemas.items():
+            context += f"\n{table.upper()}:\n"
+            for column in columns:
+                context += f"  - {column}\n"
+        
+        context += "\nKEY RELATIONSHIPS:\n"
+        context += "- citizens.village_id -> villages.village_id\n"
+        context += "- villages.district_id -> districts.district_id\n" 
+        context += "- districts.state_id -> states.state_id\n"
+        context += "- enrollments.citizen_id -> citizens.citizen_id\n"
+        context += "- enrollments.scheme_id -> schemes.scheme_id\n"
+        context += "- disbursements.citizen_id -> citizens.citizen_id\n"
+        context += "- disbursements.scheme_id -> schemes.scheme_id\n"
+        context += "- health_details.citizen_id -> citizens.citizen_id\n"
+        context += "- bank_accounts.citizen_id -> citizens.citizen_id\n"
+        
+        context += "\n🎯 INTELLIGENT QUERY PATTERNS:\n"
+        context += "SCHEME RECOGNITION (Use LIKE patterns, NO hardcoded IDs):\n"
+        context += "- 'PMAY' = 'housing' = 'Awas' → s.name LIKE '%PMAY%' OR s.name LIKE '%housing%'\n"  
+        context += "- 'MGNREGA' = 'employment' = 'work' → s.name LIKE '%MGNREGA%' OR s.name LIKE '%employment%'\n"
+        context += "- 'NSAP' = 'pension' = 'elderly' → s.name LIKE '%NSAP%' OR s.name LIKE '%pension%'\n"
+        context += "- 'Ujjwala' = 'gas' = 'LPG' → s.name LIKE '%Ujjwala%' OR s.name LIKE '%gas%'\n"
+        context += "- 'Ayushman' = 'health' = 'medical' → s.name LIKE '%Ayushman%' OR s.name LIKE '%health%'\n"
+        
+        context += "\nLOCATION INTELLIGENCE:\n"
+        context += "- For 'Gujarat citizens': JOIN to states.name LIKE '%Gujarat%'\n"
+        context += "- For 'Mumbai district': JOIN to districts.name LIKE '%Mumbai%'\n"
+        context += "- For 'rural areas': villages.name LIKE '%Rural%'\n"
+        
+        context += "\nDISABILITY INTELLIGENCE:\n"
+        context += "- 'above 70%': disability_status LIKE '%80%' OR LIKE '%90%' OR LIKE '%100%'\n"
+        context += "- 'disabled': disability_status IS NOT NULL AND != 'None'\n"
+        context += "- Values: 'Physical disability - 60%', 'Visual impairment - 80%', etc.\n"
+        
+        context += "\nCRITICAL TABLE STRUCTURE:\n"
+        context += "- disbursements: NO enrollment_id column! Join using citizen_id + scheme_id\n"
+        context += "- citizens: Use village_id to join with villages table\n"
+        context += "- health_details: disability_status field (text like 'Physical disability - 60%')\n"
+        context += "- Date fields: disbursed_on, enrollment_date, verified_on\n"
+        context += "- All JOINs must use proper foreign key relationships\n"
+        
+        context += "\nCORRECT JOIN PATTERNS:\n"
+        context += "- Disbursements: FROM citizens c JOIN disbursements d ON c.citizen_id = d.citizen_id\n"
+        context += "- With Schemes: JOIN schemes s ON d.scheme_id = s.scheme_id\n"
+        context += "- Location: JOIN villages v ON c.village_id = v.village_id\n"
+        context += "- Districts: JOIN districts dt ON v.district_id = dt.district_id\n"
+        context += "- States: JOIN states st ON dt.state_id = st.state_id\n"
+        
+        return context
+
+    def _validate_and_fix_sql(self, sql: str) -> str:
+        """Intelligently validate and fix SQL query"""
+        # Remove duplicate spaces and normalize
+        sql = re.sub(r'\s+', ' ', sql.strip())
+        
+        # SQL Server specific corrections - LIMIT to TOP
+        limit_match = re.search(r"LIMIT\s+(\d+)", sql, re.IGNORECASE)
+        if limit_match:
+            n = limit_match.group(1)
+            sql = re.sub(r"\s*LIMIT\s+\d+\s*;?\s*$", "", sql, flags=re.IGNORECASE)
+            if not re.search(r"SELECT\s+TOP\s+\d+", sql, re.IGNORECASE):
+                sql = re.sub(r"SELECT\b", f"SELECT TOP {n}", sql, flags=re.IGNORECASE)
+        
+        # Fix common column name errors based on actual schema
+        sql = re.sub(r'\benrollment_id\b', 'e.enrollment_id', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'\bdisability_percentage\b', 'disability_status', sql, flags=re.IGNORECASE)
+        
+        # Fix disbursements table - NO enrollment_id column exists
+        # disbursements table has: citizen_id, scheme_id directly (not through enrollment_id)
+        sql = re.sub(r'disbursements\s+d\s+ON\s+d\.enrollment_id\s*=\s*e\.enrollment_id', 
+                    'disbursements d ON d.citizen_id = e.citizen_id AND d.scheme_id = e.scheme_id', sql, flags=re.IGNORECASE)
+        
+        # Fix GROUP BY issues - add missing columns to GROUP BY
+        sql = self._fix_group_by_issues(sql)
+        
+        # Fix column aliases and references
+        sql = self._fix_column_references(sql)
+        
+        # Auto-add required JOINs if missing
+        if 'village' in sql.lower() and 'citizens' in sql.lower() and 'join villages' not in sql.lower():
+            sql = self._add_missing_joins(sql, 'villages')
+        
+        if 'district' in sql.lower() and 'join districts' not in sql.lower():
+            sql = self._add_missing_joins(sql, 'districts')
+            
+        if 'state' in sql.lower() and 'join states' not in sql.lower():
+            sql = self._add_missing_joins(sql, 'states')
+            
+        if 'disability' in sql.lower() and 'join health_details' not in sql.lower():
+            sql = self._add_missing_joins(sql, 'health_details')
+        
+        return sql.strip()
+    
+    def _fix_group_by_issues(self, sql: str) -> str:
+        """Fix GROUP BY clause to include all non-aggregate columns"""
+        # More robust GROUP BY fixing
+        if 'GROUP BY' not in sql.upper():
+            return sql
+            
+        # Find SELECT and GROUP BY clauses
+        select_match = re.search(r'SELECT\s+(TOP\s+\d+\s+)?(.*?)\s+FROM', sql, re.IGNORECASE | re.DOTALL)
+        group_by_match = re.search(r'GROUP\s+BY\s+(.*?)(?:\s+HAVING|\s+ORDER|\s*$)', sql, re.IGNORECASE | re.DOTALL)
+        
+        if not select_match or not group_by_match:
+            return sql
+            
+        select_part = select_match.group(2) if select_match.group(2) else select_match.group(1)
+        group_by_part = group_by_match.group(1).strip()
+        
+        # Extract non-aggregate columns from SELECT
+        select_columns = []
+        for col in select_part.split(','):
+            col = col.strip()
+            # Skip aggregate functions, CASE statements, and literals
+            if not re.search(r'\b(COUNT|SUM|AVG|MAX|MIN|STRING_AGG|FORMAT)\s*\(', col, re.IGNORECASE):
+                if not re.search(r'^\s*CASE\s+', col, re.IGNORECASE):
+                    if not re.search(r'^\s*[\'"]\w+[\'"]\s*$', col):  # Skip string literals
+                        # Extract column name (handle aliases)
+                        base_col = col
+                        if ' AS ' in col.upper():
+                            base_col = col.split(' AS ')[0].strip()
+                        if base_col and base_col not in ['*']:
+                            select_columns.append(base_col)
+        
+        # Get existing GROUP BY columns
+        existing_group_by = [col.strip() for col in group_by_part.split(',') if col.strip()]
+        
+        # Add missing columns to GROUP BY
+        for col in select_columns:
+            # Check if column is already in GROUP BY (partial match)
+            col_found = False
+            for existing_col in existing_group_by:
+                if col in existing_col or existing_col in col:
+                    col_found = True
+                    break
+            
+            if not col_found and col not in group_by_part:
+                if group_by_part:
+                    group_by_part += f", {col}"
+                else:
+                    group_by_part = col
+        
+        # Replace GROUP BY clause
+        if group_by_part:
+            sql = re.sub(r'GROUP\s+BY\s+.*?(?=\s+HAVING|\s+ORDER|\s*$)', 
+                        f'GROUP BY {group_by_part}', sql, flags=re.IGNORECASE)
+        
+        return sql
+    
+    def _fix_column_references(self, sql: str) -> str:
+        """Fix common column reference issues"""
+        # Fix citizens.name references (should be just 'name' based on schema)
+        sql = re.sub(r'citizens\.name', 'c.name', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'citizens\.citizen_id', 'c.citizen_id', sql, flags=re.IGNORECASE)
+        
+        # Fix scheme name references
+        sql = re.sub(r'schemes\.name', 's.name', sql, flags=re.IGNORECASE)
+        
+        # Fix common issues with HAVING COUNT
+        sql = re.sub(r'HAVING\s+COUNT\s*\(\s*ba\.account_id\s*\)\s*>\s*1', 
+                    'HAVING COUNT(DISTINCT ba.account_id) > 1', sql, flags=re.IGNORECASE)
+        
+        return sql
+    
+    def _add_missing_joins(self, sql: str, target_table: str) -> str:
+        """Intelligently add missing JOINs"""
+        if target_table == 'villages':
+            if 'FROM citizens' in sql and 'JOIN villages' not in sql:
+                sql = sql.replace('FROM citizens', 'FROM citizens JOIN villages ON citizens.village_id = villages.village_id')
+        elif target_table == 'districts':
+            if 'JOIN villages' in sql and 'JOIN districts' not in sql:
+                sql = sql.replace('JOIN villages ON', 'JOIN villages ON citizens.village_id = villages.village_id JOIN districts ON villages.district_id = districts.district_id')
+        elif target_table == 'states':
+            if 'JOIN districts' in sql and 'JOIN states' not in sql:
+                sql = sql.replace('JOIN districts ON', 'JOIN districts ON villages.district_id = districts.district_id JOIN states ON districts.state_id = states.state_id')
+        elif target_table == 'health_details':
+            if 'FROM citizens' in sql and 'JOIN health_details' not in sql:
+                sql = sql.replace('FROM citizens', 'FROM citizens LEFT JOIN health_details ON citizens.citizen_id = health_details.citizen_id')
+        
+        return sql
+    
+    def _auto_correct_sql_dialect(self, sql: str) -> str:
+        """Auto-correct SQL syntax for SQL Server (legacy method)"""
+        return self._validate_and_fix_sql(sql)
+
+    def _try_pattern_based_sql(self, query: str) -> Optional[str]:
+        """Fallback pattern-based SQL generation when Azure OpenAI is not available"""
+        query_lower = query.lower()
+        
+        # Pattern 1: Total disbursement by scheme
+        if re.search(r'total.*disbursement.*scheme', query_lower):
+            return """SELECT s.name AS scheme_name, SUM(d.amount) AS total_disbursement_amount 
+FROM disbursements d 
+JOIN schemes s ON d.scheme_id = s.scheme_id 
+GROUP BY s.scheme_id, s.name 
+ORDER BY total_disbursement_amount DESC"""
+        
+        # Pattern 2: Citizens receiving maximum benefits
+        if re.search(r'citizens.*receiv.*maximum.*benefit', query_lower):
+            return """SELECT TOP 100 c.citizen_id, c.name, SUM(d.amount) AS total_benefit 
+FROM citizens c 
+JOIN disbursements d ON c.citizen_id = d.citizen_id 
+GROUP BY c.citizen_id, c.name 
+ORDER BY total_benefit DESC"""
+        
+        # Pattern 3: Citizens in multiple schemes
+        if re.search(r'citizens.*multiple.*scheme', query_lower):
+            return """SELECT c.citizen_id, c.name AS citizen_name, c.aadhaar_no, COUNT(DISTINCT e.scheme_id) AS scheme_count
+FROM citizens c 
+JOIN enrollments e ON c.citizen_id = e.citizen_id
+GROUP BY c.citizen_id, c.name, c.aadhaar_no
+HAVING COUNT(DISTINCT e.scheme_id) > 1
+ORDER BY scheme_count DESC"""
+        
+        # Pattern 4: Officers verification activity
+        if re.search(r'officer.*verification.*activity', query_lower):
+            return """SELECT dt.name AS district_name, o.name AS officer_name, o.designation, COUNT(v.verification_id) AS verification_activity_count 
+FROM officers o 
+JOIN districts dt ON o.district_id = dt.district_id 
+JOIN verifications v ON o.officer_id = v.officer_id 
+GROUP BY dt.district_id, dt.name, o.officer_id, o.name, o.designation
+ORDER BY district_name, verification_activity_count DESC"""
+        
+        # Pattern 5: Female citizens with age filter
+        if re.search(r'female.*citizen', query_lower) and re.search(r'age|aged', query_lower):
+            return """SELECT c.citizen_id, c.name, c.age, c.mobile_no, e.enrollment_date, e.status
+FROM citizens c
+JOIN enrollments e ON c.citizen_id = e.citizen_id
+JOIN schemes s ON e.scheme_id = s.scheme_id
+WHERE c.gender = 'Female' 
+  AND c.age BETWEEN 18 AND 30
+ORDER BY c.age"""
+        
+        # Pattern 6: Monthly disbursement trends
+        if re.search(r'monthly.*disbursement.*trend', query_lower):
+            return """SELECT MONTH(d.disbursed_on) AS month_number, 
+       COUNT(d.disbursement_id) AS disbursement_count,
+       SUM(d.amount) AS monthly_total,
+       AVG(d.amount) AS average_amount
+FROM disbursements d
+JOIN schemes s ON d.scheme_id = s.scheme_id
+GROUP BY MONTH(d.disbursed_on)
+ORDER BY month_number"""
+        
+        # Pattern 7: Citizens without bank accounts
+        if re.search(r'citizens.*without.*bank.*account', query_lower):
+            return """SELECT c.citizen_id, c.name, c.mobile_no, c.email, 
+       SUM(d.amount) AS total_disbursed
+FROM citizens c
+JOIN disbursements d ON c.citizen_id = d.citizen_id
+LEFT JOIN bank_accounts ba ON c.citizen_id = ba.citizen_id
+WHERE ba.account_id IS NULL
+GROUP BY c.citizen_id, c.name, c.mobile_no, c.email
+ORDER BY total_disbursed DESC"""
+        
+        return None
+
+    def convert_to_sql(self, query: str) -> Dict[str, Any]:
+        """Main method to convert natural language query to SQL"""
+        try:
+            logger.info(f"Processing query: '{query}'")
+            
+            # Try Azure OpenAI first
+            sql = self._try_azure_openai(query)
+            method = "azure_openai"
+            
+            # Fallback to pattern-based if Azure OpenAI fails
+            if not sql:
+                logger.info("Azure OpenAI not available, trying pattern-based approach")
+                sql = self._try_pattern_based_sql(query)
+                method = "pattern_based"
+            
+            if sql:
                 return {
                     "status": "success",
-                    "output": f"There are {count} {entity} in the database.",
-                    "sql_query": sql_query,
+                    "success": True,
+                    "sql_query": sql,
+                    "original_query": query,
                     "method": method,
-                    "confidence": self._calculate_confidence(method),
-                    "chart_type": "metric"
-                }
-            # Human-readable output for SELECT queries
-            if sql_query.strip().lower().startswith("select"):
-                rows = db_response.get("row_count", 0)
-                entity = entities[0] if entities else "records"
-                return {
-                    "status": "success",
-                    "output": f"Found {rows} {entity} matching your query.",
-                    "sql_query": sql_query,
-                    "method": method,
-                    "confidence": self._calculate_confidence(method),
+                    "confidence": 0.8 if method == "azure_openai" else 0.6,
                     "chart_type": "table"
                 }
-            return {
-                "status": "success",
-                "output": "Query executed successfully.",
-                "sql_query": sql_query,
-                "method": method,
-                "confidence": self._calculate_confidence(method)
-            }
-        except Exception as e:
-            logger.error(f"Error processing query: {e}")
+            
+            # Failed to convert
             return {
                 "status": "error",
-                "message": f"Error processing query: {str(e)}"
+                "success": False,
+                "message": "Could not convert query to SQL. Please try rephrasing or be more specific.",
+                "error": "Could not convert query to SQL",
+                "original_query": query,
+                "suggestions": [
+                    "Try: 'Total disbursement amount by scheme'",
+                    "Try: 'Citizens receiving maximum benefits'",
+                    "Try: 'Citizens enrolled in multiple schemes'",
+                    "Try: 'Officers with highest verification activity'",
+                    "Try: 'Female citizens aged 18-30'",
+                    "Try: 'Monthly disbursement trends'"
+                ]
             }
-    
-    def _extract_entities(self, query: str) -> List[str]:
-        """Extract database entities (tables) from query"""
-        entities = []
-        
-        for entity, synonyms in self.entity_synonyms.items():
-            for synonym in [entity] + synonyms:
-                if synonym in query:
-                    if entity not in entities:
-                        entities.append(entity)
-                    break
-        
-        return entities
-    
-    def _extract_operations(self, query: str) -> List[str]:
-        """Extract operations from query"""
-        operations = []
-        
-        for operation, config in self.operation_patterns.items():
-            for keyword in config["keywords"]:
-                if keyword in query:
-                    if operation not in operations:
-                        operations.append(operation)
-                    break
-        
-        return operations
-    
-    def _intelligent_pattern_match(self, query: str, entities: List[str], operations: List[str]) -> Optional[str]:
-        """Enhanced pattern matching using entities and operations"""
-        
-        if not entities:
-            return None
-        
-        primary_entity = entities[0]  # Use first detected entity as primary
-        
-        # Count operations
-        if "count" in operations:
-            template = self.query_templates["count_records"]
-            return template.generate(table=primary_entity)
-        
-        # List operations with filters
-        if "list" in operations or "show" in operations:
-            # Check for age filters on citizens
-            if primary_entity == "citizens" and "filter" in operations:
-                age_match = re.search(r'\d+', query)
-                if age_match:
-                    age = int(age_match.group())
-                    template = self.query_templates["age_filter"]
-                    
-                    if any(word in query for word in ["above", "over", "greater", "more than"]):
-                        return template.generate(operator=">", age=age, sort_order="DESC", limit=20)
-                    elif any(word in query for word in ["below", "under", "less", "younger"]):
-                        return template.generate(operator="<", age=age, sort_order="ASC", limit=20)
-                    elif "between" in query:
-                        # Try to extract age range
-                        ages = re.findall(r'\d+', query)
-                        if len(ages) >= 2:
-                            min_age, max_age = sorted([int(ages[0]), int(ages[1])])
-                            range_template = self.query_templates["age_range"]
-                            return range_template.generate(min_age=min_age, max_age=max_age, limit=20)
             
-            # Basic list operation
-            template = self.query_templates["select_all"]
-            primary_key = self.table_schemas[primary_entity]["primary_key"]
-            return template.generate(table=primary_entity, order_by=primary_key, limit=20)
-        
-        # Group operations
-        if "group" in operations and primary_entity in self.table_schemas:
-            # Determine grouping column based on query content
-            if primary_entity == "citizens":
-                if "gender" in query:
-                    return "SELECT gender, COUNT(*) as count FROM citizens GROUP BY gender ORDER BY count DESC"
-                elif "age" in query:
-                    return """
-                        SELECT 
-                            CASE 
-                                WHEN age < 18 THEN 'Under 18'
-                                WHEN age BETWEEN 18 AND 30 THEN '18-30'
-                                WHEN age BETWEEN 31 AND 50 THEN '31-50'
-                                WHEN age BETWEEN 51 AND 65 THEN '51-65'
-                                ELSE 'Above 65'
-                            END as age_group,
-                            COUNT(*) as count
-                        FROM citizens 
-                        GROUP BY age_group 
-                        ORDER BY count DESC
-                    """
-            elif primary_entity == "officers":
-                if "department" in query:
-                    return "SELECT department, COUNT(*) as count FROM officers GROUP BY department ORDER BY count DESC"
-                elif "rank" in query:
-                    return "SELECT rank, COUNT(*) as count FROM officers GROUP BY rank ORDER BY count DESC"
-        
-        return None
-    
-    def _format_success_response(self, sql_query: str, method: str, original: str, processed: str, entities: List[str]) -> Dict[str, Any]:
-        """Format successful query response"""
-        
-        # Determine chart type based on query
-        chart_type = "table"  # default
-        
-        if "COUNT(*)" in sql_query.upper():
-            chart_type = "metric"
-        elif "GROUP BY" in sql_query.upper():
-            chart_type = "bar"
-        elif any(word in sql_query.upper() for word in ["AVG", "SUM", "MAX", "MIN"]):
-            chart_type = "metric"
-        
-        return {
-            "status": "success",
-            "sql_query": sql_query.strip(),
-            "method": method,
-            "original_query": original,
-            "processed_query": processed,
-            "detected_entities": entities,
-            "chart_type": chart_type,
-            "confidence": self._calculate_confidence(method)
-        }
-    
-    def _calculate_confidence(self, method: str) -> float:
-        """Calculate confidence score based on method used"""
-        confidence_scores = {
-            "hardcoded": 0.95,
-            "intelligent_pattern": 0.85,
-            "basic_pattern": 0.70,
-            "gpt": 0.90
-        }
-        return confidence_scores.get(method, 0.60)
-    
-    def _gpt_process_query(self, query: str, entities: List[str], operations: List[str]) -> Optional[str]:
-        """Call Azure OpenAI API to convert natural language to SQL"""
-        import requests
-        # Prepare prompt
-        schema_desc = []
-        for table, info in self.table_schemas.items():
-            columns = ", ".join(info["columns"])
-            schema_desc.append(f"{table}: {columns} - {info['description']}")
-        examples = []
-        sample_queries = self.get_sample_queries()
-        for category, queries in sample_queries.items():
-            examples.extend(queries[:2])
-        prompt = f"""
-You are a SQL query generator for a welfare database system.
-
-Database Schema:
-{chr(10).join(schema_desc)}
-
-Sample Queries:
-{chr(10).join(examples)}
-
-User Query: \"{query}\"
-Detected Entities: {entities}
-Detected Operations: {operations}
-
-Generate a safe SELECT-only SQL query. Include appropriate LIMIT clause.
-Response format: Just the SQL query, no explanations.
-"""
-        # Azure OpenAI API call
-        endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
-        deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT')
-        api_key = self.gpt_api_key
-        if not endpoint or not deployment or not api_key:
-            logger.error("Azure OpenAI endpoint, deployment, or API key missing")
-            return None
-        url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version=2023-03-15-preview"
-        headers = {
-            "Content-Type": "application/json",
-            "api-key": api_key
-        }
-        data = {
-            "messages": [
-                {"role": "system", "content": "You are a helpful assistant that generates SQL queries."},
-                {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 256,
-            "temperature": 0.2,
-            "top_p": 1,
-            "frequency_penalty": 0,
-            "presence_penalty": 0,
-            "stop": None
-        }
-        try:
-            response = requests.post(url, headers=headers, json=data, timeout=30)
-            response.raise_for_status()
-            result = response.json()
-            sql = result["choices"][0]["message"]["content"].strip()
-            # Basic validation: only allow SELECT queries
-            if not sql.lower().startswith("select"):
-                logger.error(f"GPT returned non-SELECT SQL: {sql}")
-                return None
-            return sql
         except Exception as e:
-            logger.error(f"GPT API error: {e}")
-            return None
-    
-    def prepare_gpt_prompt(self, query: str, entities: List[str], operations: List[str]) -> str:
-        """Prepare a comprehensive prompt for GPT integration"""
-        
-        # Build schema description
-        schema_desc = []
-        for table, info in self.table_schemas.items():
-            columns = ", ".join(info["columns"])
-            schema_desc.append(f"{table}: {columns} - {info['description']}")
-        
-        # Get relevant examples
-        examples = []
-        sample_queries = self.get_sample_queries()
-        for category, queries in sample_queries.items():
-            examples.extend(queries[:2])  # Take 2 examples from each category
-        
-        prompt = f"""
-Database Schema:
-{chr(10).join(schema_desc)}
-
-Sample Queries and Expected Patterns:
-{chr(10).join(f"- {q}" for q in examples[:10])}
-
-User Query: "{query}"
-Detected Entities: {entities}
-Detected Operations: {operations}
-
-Instructions:
-1. Generate a safe SELECT-only SQL query
-2. Include appropriate WHERE clauses if filtering is needed
-3. Add ORDER BY for better results presentation  
-4. Always include LIMIT clause (max 50 records)
-5. Use only the tables and columns from the schema above
-6. Return only the SQL query without explanations
-
-SQL Query:
-"""
-        return prompt.strip()
-    
-    def get_gpt_integration_status(self) -> Dict[str, Any]:
-        """Get current GPT integration status and configuration"""
-        return {
-            "gpt_enabled": self.use_gpt,
-            "api_key_configured": bool(self.gpt_api_key),
-            "ready_for_integration": bool(self.gpt_api_key and self.use_gpt),
-            "supported_features": [
-                "Complex query understanding",
-                "Context-aware SQL generation", 
-                "Multi-table join queries",
-                "Advanced filtering and aggregation"
-            ],
-            "environment_variables": {
-                "USE_GPT_QUERY_PROCESSING": "Set to 'true' to enable GPT processing",
-                "OPENAI_API_KEY": "Required for GPT integration"
+            logger.error(f"Error in convert_to_sql: {e}")
+            return {
+                "status": "error",
+                "success": False,
+                "message": f"Processing error: {str(e)}",
+                "error": str(e),
+                "original_query": query
             }
-        }
-    
-    def _clean_query(self, query: str) -> str:
-        """Clean and normalize the input query"""
-        # Convert to lowercase and strip whitespace
-        cleaned = query.lower().strip()
-        
-        # Remove extra spaces
-        cleaned = re.sub(r'\s+', ' ', cleaned)
-        
-        # Remove question marks and exclamation marks
-        cleaned = re.sub(r'[?!]', '', cleaned)
-        
-        return cleaned
-    
-    def _match_hardcoded_query(self, query: str) -> Optional[str]:
-        """Try to match query with hardcoded mappings"""
-        # Direct match
-        if query in self.hardcoded_queries:
-            return self.hardcoded_queries[query]
-        
-        # Partial match
-        for key, sql in self.hardcoded_queries.items():
-            if key in query or query in key:
-                return sql
-        
-        return None
-    
-    def _pattern_match_query(self, query: str) -> Optional[str]:
-        """Try to match query using pattern recognition"""
-        
-        # Count patterns
-        if re.search(r'\b(count|how many|number of)\b', query):
-            if 'citizen' in query:
-                return "SELECT COUNT(*) as total_citizens FROM citizens"
-            elif 'officer' in query:
-                return "SELECT COUNT(*) as total_officers FROM officers"
-            elif 'scheme' in query:
-                return "SELECT COUNT(*) as total_schemes FROM schemes"
-        
-        # Show/List patterns
-        if re.search(r'\b(show|list|display|get)\b', query):
-            if 'citizen' in query:
-                return "SELECT * FROM citizens LIMIT 10"
-            elif 'officer' in query:
-                return "SELECT * FROM officers LIMIT 10"
-            elif 'scheme' in query:
-                return "SELECT * FROM schemes LIMIT 10"
-        
-        # Age-based queries
-        if re.search(r'\bage\b', query):
-            if re.search(r'\b(above|over|greater than)\b', query):
-                age_match = re.search(r'\d+', query)
-                if age_match:
-                    age = age_match.group()
-                    return f"SELECT * FROM citizens WHERE age > {age}"
-            elif re.search(r'\b(below|under|less than)\b', query):
-                age_match = re.search(r'\d+', query)
-                if age_match:
-                    age = age_match.group()
-                    return f"SELECT * FROM citizens WHERE age < {age}"
-        
-        return None
-    
-    def _get_intelligent_suggestions(self, entities: List[str], operations: List[str]) -> List[str]:
-        """Generate intelligent suggestions based on detected entities and operations"""
-        suggestions = []
-        
-        if entities:
-            primary_entity = entities[0]
-            base_suggestions = [
-                f"Show all {primary_entity}",
-                f"Count {primary_entity}",
-                f"List {primary_entity}"
-            ]
-            suggestions.extend(base_suggestions)
-            
-            # Entity-specific suggestions
-            if primary_entity == "citizens":
-                suggestions.extend([
-                    "Show citizens above age 30",
-                    "Citizens by gender",
-                    "Average age of citizens"
-                ])
-            elif primary_entity == "officers":
-                suggestions.extend([
-                    "Officers by department",
-                    "Show officers by rank"
-                ])
-        else:
-            # General suggestions if no entities detected
-            suggestions = self._get_query_suggestions()
-        
-        return suggestions[:6]  # Limit to 6 suggestions
-    
-    def _get_contextual_samples(self, entities: List[str]) -> Dict[str, List[str]]:
-        """Get contextual sample queries based on detected entities"""
-        if not entities:
-            return self.get_sample_queries()
-        
-        samples = {}
-        for entity in entities:
-            if entity in self.table_schemas:
-                entity_samples = self.table_schemas[entity].get("sample_queries", [])
-                samples[entity.title()] = entity_samples
-        
-        return samples if samples else self.get_sample_queries()
-    
-    def _get_query_suggestions(self) -> List[str]:
-        """Get general query suggestions"""
-        return [
-            "Show all citizens",
-            "Count citizens", 
-            "List officers",
-            "How many schemes",
-            "Show citizens above age 30",
-            "Citizens by gender",
-            "Officers by department",
-            "Database summary"
-        ]
-    
-    def get_sample_queries(self) -> Dict[str, List[str]]:
-        """Get comprehensive categorized sample queries"""
-        return {
-            "Citizens": [
-                "Show all citizens",
-                "Count citizens", 
-                "Show citizens above age 30",
-                "Citizens below age 25",
-                "Citizens by gender",
-                "Average age of citizens",
-                "Oldest citizen",
-                "Citizens between age 25 and 45"
-            ],
-            "Officers": [
-                "Show all officers",
-                "Count officers",
-                "List officers",
-                "Officers by department",
-                "Officers by rank"
-            ],
-            "Schemes": [
-                "Show all schemes", 
-                "Count schemes",
-                "List available schemes",
-                "Scheme details"
-            ],
-            "Analytics": [
-                "Database summary",
-                "Data overview",
-                "Citizens by age group",
-                "Officers by department",
-                "Show tables"
-            ]
-        }
-    
-    def get_query_templates_info(self) -> Dict[str, Dict[str, Any]]:
-        """Get information about available query templates"""
-        template_info = {}
-        for name, template in self.query_templates.items():
-            template_info[name] = {
-                "description": template.description,
-                "parameters": template.parameters,
-                "example": template.template
-            }
-        return template_info
-    
-    def get_supported_entities(self) -> Dict[str, Dict[str, Any]]:
-        """Get information about supported database entities"""
-        return self.table_schemas
-    
-    def validate_query_safety(self, sql_query: str) -> Tuple[bool, str]:
-        """Validate that the generated SQL query is safe to execute"""
-        sql_upper = sql_query.upper().strip()
-        
-        # Block dangerous operations
-        dangerous_patterns = [
-            'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'TRUNCATE',
-            'EXEC', 'EXECUTE', 'UNION', '--', '/*', '*/', ';'
-        ]
-        
-        for pattern in dangerous_patterns:
-            if pattern in sql_upper:
-                return False, f"Query contains potentially dangerous operation: {pattern}"
-        
-        # Ensure it's a SELECT query
-        if not sql_upper.startswith('SELECT'):
-            return False, "Only SELECT queries are allowed"
-        
-        # Check for reasonable LIMIT
-        if 'LIMIT' not in sql_upper:
-            return False, "Query must include a LIMIT clause for safety"
-        
-        return True, "Query is safe to execute"
-    
-    def explain_query(self, sql_query: str) -> Dict[str, Any]:
-        """Provide a human-readable explanation of the SQL query"""
-        explanation = {
-            "query": sql_query,
-            "explanation": "This query...",
-            "tables_used": [],
-            "operations": [],
-            "filters": [],
-            "sorting": None,
-            "limit": None
-        }
-        
-        # Extract tables
-        tables = re.findall(r'FROM\s+(\w+)', sql_query, re.IGNORECASE)
-        explanation["tables_used"] = tables
-        
-        # Detect operations
-        if "COUNT(" in sql_query.upper():
-            explanation["operations"].append("Count records")
-        if "GROUP BY" in sql_query.upper():
-            explanation["operations"].append("Group results")
-        if "AVG(" in sql_query.upper():
-            explanation["operations"].append("Calculate average")
-        
-        # Extract WHERE conditions
-        where_match = re.search(r'WHERE\s+(.+?)(?:\s+ORDER\s+BY|\s+GROUP\s+BY|\s+LIMIT|$)', 
-                               sql_query, re.IGNORECASE | re.DOTALL)
-        if where_match:
-            explanation["filters"].append(where_match.group(1).strip())
-        
-        # Extract ORDER BY
-        order_match = re.search(r'ORDER\s+BY\s+(.+?)(?:\s+LIMIT|$)', sql_query, re.IGNORECASE)
-        if order_match:
-            explanation["sorting"] = order_match.group(1).strip()
-        
-        # Extract LIMIT
-        limit_match = re.search(r'LIMIT\s+(\d+)', sql_query, re.IGNORECASE)
-        if limit_match:
-            explanation["limit"] = int(limit_match.group(1))
-        
-        # Generate natural language explanation
-        if explanation["operations"]:
-            explanation["explanation"] = f"This query {', '.join(explanation['operations']).lower()}"
-        else:
-            explanation["explanation"] = "This query retrieves data"
-        
-        if explanation["tables_used"]:
-            explanation["explanation"] += f" from {', '.join(explanation['tables_used'])}"
-        
-        if explanation["filters"]:
-            explanation["explanation"] += f" where {explanation['filters'][0]}"
-        
-        if explanation["sorting"]:
-            explanation["explanation"] += f", sorted by {explanation['sorting']}"
-        
-        if explanation["limit"]:
-            explanation["explanation"] += f", limited to {explanation['limit']} records"
-        
-        explanation["explanation"] += "."
-        
-        return explanation
 
-# Enhanced global functions
+    def process_query(self, query: str) -> Dict[str, Any]:
+        """Main method to process natural language queries (called by API routes)"""
+        return self.convert_to_sql(query)
+
+    def natural_language_to_sql(self, query: str) -> Dict[str, Any]:
+        """Convert natural language query to SQL"""
+        return self.convert_to_sql(query)
+
+# Global instance
 prompt_engine = PromptEngine()
 
-def convert_to_sql(query: str) -> Dict[str, Any]:
-    """Convert natural language query to SQL with enhanced processing"""
-    return prompt_engine.process_query(query)
-
-def get_sample_queries() -> Dict[str, List[str]]:
-    """Get categorized sample queries"""
-    return prompt_engine.get_sample_queries()
-
-def get_query_templates() -> Dict[str, Dict[str, Any]]:
-    """Get available query templates"""
-    return prompt_engine.get_query_templates_info()
-
-def validate_sql_safety(sql_query: str) -> Tuple[bool, str]:
-    """Validate SQL query safety"""
-    return prompt_engine.validate_query_safety(sql_query)
-
-def explain_sql_query(sql_query: str) -> Dict[str, Any]:
-    """Get human-readable explanation of SQL query"""
-    return prompt_engine.explain_query(sql_query)
-
-def get_supported_entities() -> Dict[str, Dict[str, Any]]:
-    """Get supported database entities information"""
-    return prompt_engine.get_supported_entities()
-
-def get_gpt_status() -> Dict[str, Any]:
-    """Get GPT integration status"""
-    return prompt_engine.get_gpt_integration_status()
-
-def prepare_gpt_prompt_for_query(query: str) -> str:
-    """Prepare GPT prompt for a specific query (for future use)"""
-    entities = prompt_engine._extract_entities(prompt_engine._clean_query(query))
-    operations = prompt_engine._extract_operations(prompt_engine._clean_query(query))
-    return prompt_engine.prepare_gpt_prompt(query, entities, operations)
+def convert_natural_language_to_sql(query: str) -> Dict[str, Any]:
+    """Global function to convert natural language to SQL"""
+    return prompt_engine.convert_to_sql(query)

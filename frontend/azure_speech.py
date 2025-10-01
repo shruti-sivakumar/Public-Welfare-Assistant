@@ -16,12 +16,16 @@ load_dotenv()
 
 class AzureSpeechService:
     def __init__(self):
-        """Initialize Azure Speech Service with credentials from .env file"""
+        """Initialize Azure Speech Service with credentials from environment variables"""
         self.speech_key = os.getenv("AZURE_SPEECH_KEY")
         self.speech_region = os.getenv("AZURE_SPEECH_REGION")
         
+        # Debug logging
+        print(f"DEBUG: AZURE_SPEECH_KEY={'***' if self.speech_key else 'None'}")
+        print(f"DEBUG: AZURE_SPEECH_REGION={self.speech_region}")
+        
         if not self.speech_key or not self.speech_region:
-            raise ValueError("Azure Speech Service credentials not found in .env file")
+            raise ValueError(f"Azure Speech Service credentials missing: KEY={'***' if self.speech_key else 'None'}, REGION={self.speech_region}")
         
         # Create speech config
         self.speech_config = speechsdk.SpeechConfig(
@@ -154,7 +158,9 @@ def get_azure_speech_service():
             _azure_speech_service = AzureSpeechService()
         return _azure_speech_service
     except Exception as e:
-        st.error(f"Failed to initialize Azure Speech Service: {str(e)}")
+        print(f"ERROR: Failed to initialize Azure Speech Service: {str(e)}")
+        if hasattr(st, 'error'):
+            st.error(f"Failed to initialize Azure Speech Service: {str(e)}")
         return None
 
 def transcribe_audio(audio_data):

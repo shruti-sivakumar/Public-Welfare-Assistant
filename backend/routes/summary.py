@@ -8,10 +8,14 @@ import logging
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.db import execute_sql, get_db_connection
-from backend.auth import verify_token, check_permission
+# Add parent directory to path for imports
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+from db import execute_sql, get_db_connection
+from auth import verify_token, check_permission
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
