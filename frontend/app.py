@@ -549,7 +549,7 @@ def ask_page(selected_schemes):
             # Query details
             with st.expander("View Details", expanded=(i == 0)):
                 # Tabs for different views
-                tab1, tab2, tab3 = st.tabs(["Table", "SQL"])
+                tab1, tab2, tab3 = st.tabs(["Table", "Chart", "SQL"])
                 
                 with tab1:
                     if not chat['response']['data'].empty:
@@ -570,6 +570,126 @@ def ask_page(selected_schemes):
                             st.info("Data export requires analyst or admin role. Contact your administrator for access.")
                 
                 with tab2:
+                    # Chart visualization
+                    if not chat['response']['data'].empty:
+                        df = chat['response']['data']
+                        
+                        # Show data info for debugging
+                        with st.expander("🔍 Data Debug Info", expanded=False):
+                            st.write("**Column Information:**")
+                            for col in df.columns:
+                                dtype = str(df[col].dtype)
+                                sample_values = df[col].dropna().head(3).tolist()
+                                st.write(f"- **{col}** ({dtype}): {sample_values}")
+                        
+                        # More flexible column detection
+                        if len(df.columns) >= 2:
+                            # Get all possible numeric columns (including those that can be converted)
+                            numeric_cols = []
+                            categorical_cols = []
+                            
+                            for col in df.columns:
+                                # Try to identify numeric columns more flexibly
+                                if df[col].dtype in ['int64', 'float64', 'int32', 'float32', 'int16', 'float16']:
+                                    numeric_cols.append(col)
+                                elif df[col].dtype == 'object':
+                                    # Check if object column contains numbers
+                                    try:
+                                        # Try to convert to numeric
+                                        pd.to_numeric(df[col].dropna().head(5))
+                                        numeric_cols.append(col)
+                                    except (ValueError, TypeError):
+                                        # It's categorical
+                                        categorical_cols.append(col)
+                                else:
+                                    # String, datetime, or other types - treat as categorical
+                                    categorical_cols.append(col)
+                            
+                            st.write(f"**Detected:** {len(numeric_cols)} numeric, {len(categorical_cols)} categorical columns")
+                            
+                            if len(numeric_cols) > 0 and len(categorical_cols) > 0:
+                                # Allow user to select columns
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    selected_label = st.selectbox("Label Column:", categorical_cols, 
+                                                                index=0, key=f"label_{i}")
+                                with col2:
+                                    selected_value = st.selectbox("Value Column:", numeric_cols, 
+                                                                index=0, key=f"value_{i}")
+                                
+                                # Create pie chart
+                                try:
+                                    # Convert value column to numeric if needed
+                                    if df[selected_value].dtype == 'object':
+                                        df[selected_value] = pd.to_numeric(df[selected_value], errors='coerce')
+                                    
+                                    # Remove any null values
+                                    clean_df = df[[selected_label, selected_value]].dropna()
+                                    
+                                    if len(clean_df) == 0:
+                                        st.error("No valid data after cleaning nulls")
+                                    else:
+                                        # Aggregate data by label (sum values for each category)
+                                        chart_data = clean_df.groupby(selected_label)[selected_value].sum().reset_index()
+                                        
+                                        # Filter out zero or negative values for pie chart
+                                        chart_data = chart_data[chart_data[selected_value] > 0]
+                                        
+                                        if len(chart_data) == 0:
+                                            st.warning("No positive values found for pie chart")
+                                        elif len(chart_data) > 20:
+                                            # Too many categories, show top 20
+                                            chart_data = chart_data.nlargest(20, selected_value)
+                                            st.info("Showing top 20 categories")
+                                        
+                                        # Create pie chart
+                                        fig = px.pie(chart_data, 
+                                                   values=selected_value, 
+                                                   names=selected_label,
+                                                   title=f"Distribution of {selected_value} by {selected_label}")
+                                        
+                                        fig.update_traces(textposition='inside', textinfo='percent+label')
+                                        fig.update_layout(height=500, showlegend=True)
+                                        
+                                        st.plotly_chart(fig, use_container_width=True)
+                                        
+                                        # Show summary stats
+                                        total_value = chart_data[selected_value].sum()
+                                        st.info(f"**Total {selected_value}:** {total_value:,.2f} | **Categories:** {len(chart_data)}")
+                                        
+                                except Exception as e:
+                                    st.error(f"Chart generation failed: {str(e)}")
+                                    st.info("**Troubleshooting:**")
+                                    st.info("• Check if numeric column contains valid numbers")
+                                    st.info("• Ensure categorical column has reasonable number of unique values")
+                                    st.info("• Try different column combinations")
+                            
+                            elif len(numeric_cols) == 0:
+                                st.warning("**No numeric columns detected** for pie chart values")
+                                st.info("**Available columns:**")
+                                for col in df.columns:
+                                    dtype = str(df[col].dtype)
+                                    st.write(f"• {col} ({dtype})")
+                                st.info("💡 **Tip:** Pie charts need at least one numeric column for values")
+                                
+                            elif len(categorical_cols) == 0:
+                                st.warning("**No categorical columns detected** for pie chart labels")
+                                st.info("**Available columns:**")
+                                for col in df.columns:
+                                    dtype = str(df[col].dtype)
+                                    st.write(f"• {col} ({dtype})")
+                                st.info("💡 **Tip:** Pie charts need at least one text/categorical column for labels")
+                                
+                            else:
+                                st.info("Unable to determine suitable columns for pie chart")
+                                
+                        else:
+                            st.info("Chart visualization requires at least 2 columns of data.")
+                            
+                    else:
+                        st.info("No data available for chart visualization.")
+                
+                with tab3:
                     st.code(chat['response']['sql'], language='sql')
                     # Show OpenAI explanation if available
                     if 'openai_explanation' in chat['response']:
