@@ -28,7 +28,7 @@ ORDER BY verification_count DESC
 LIMIT 1;
 
 
--- 4. Female citizens aged 18-30 enrolled in MGNREGA employment scheme (FIXED)
+-- 4. Female citizens aged 18-30 enrolled in MGNREGA employment scheme 
 SELECT c.citizen_id, c.name, c.age, c.mobile_no, e.enrollment_date, e.status
 FROM citizens c
 JOIN enrollments e ON c.citizen_id = e.citizen_id
@@ -38,7 +38,7 @@ WHERE c.gender = 'Female'
   AND (s.name LIKE '%MGNREGA%' OR s.name LIKE '%employment%')
 ORDER BY c.age;
 
--- 5. Disbursement summary for citizens with chronic health conditions (FIXED)
+-- 5. Disbursement summary for citizens with chronic health conditions 
 SELECT c.citizen_id, c.name, h.chronic_conditions, s.name AS scheme_name, 
        SUM(d.amount) AS total_received, COUNT(d.disbursement_id) AS payment_count
 FROM citizens c
