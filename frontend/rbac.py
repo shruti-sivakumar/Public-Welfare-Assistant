@@ -35,7 +35,7 @@ class RBACManager:
                 'display_name': 'Welfare Officer',
                 'description': 'Access to welfare data and basic reporting',
                 'color': '#44ff44',
-                'icon': '�'
+                'icon': 'Officer'
             },
             'user': {
                 'display_name': 'Basic User',
@@ -194,7 +194,8 @@ def show_access_control_panel():
     with tab1:
         st.markdown("#### Available Roles")
         for role_key, role_info in rbac.available_roles.items():
-            with st.expander(f"{role_info['icon']} {role_info['display_name']}"):
+            icon = role_info.get('icon', '👤')
+            with st.expander(f"{icon} {role_info['display_name']}"):
                 st.markdown(f"**Description:** {role_info['description']}")
                 
                 # Show features this role can access

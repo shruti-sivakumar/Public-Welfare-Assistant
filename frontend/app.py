@@ -7,6 +7,8 @@ import time
 import json
 from io import BytesIO
 import requests
+import uuid
+import hashlib
 
 # Import our modules
 from azure_db import init_database_connection, test_connection, execute_query
@@ -28,6 +30,16 @@ from in_app_auth import (
     is_authenticated
 )
 from rbac import rbac, show_access_control_panel, show_role_guard, show_feature_guard, can_query_database, can_export_data, is_admin, is_analyst, is_officer
+from access_logger import (
+    access_logger, 
+    log_login, 
+    log_logout, 
+    log_query, 
+    log_export, 
+    log_page_access, 
+    log_admin_action, 
+    log_security_event
+)
 
 # Page config
 st.set_page_config(
@@ -98,6 +110,14 @@ def init_session_state():
     # Global database connection flag
     if 'global_db_connected' not in st.session_state:
         st.session_state.global_db_connected = False
+    
+    # Session tracking for access logs
+    if 'session_id' not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
+    if 'session_start_time' not in st.session_state:
+        st.session_state.session_start_time = datetime.now()
+    if 'last_login_logged' not in st.session_state:
+        st.session_state.last_login_logged = False
 
 # Auto-connect to Azure Database BEFORE login
 def auto_connect_database():
@@ -336,6 +356,11 @@ def create_sidebar():
         
         # Logout button at the very bottom
         if st.button("Logout", type="primary", use_container_width=True, key="sidebar_logout"):
+            # Log logout before clearing session
+            current_user = get_current_user()
+            if current_user:
+                log_logout(current_user)
+            
             # Clear all session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
@@ -361,7 +386,7 @@ def ask_page(selected_schemes):
     col1, col2, col3 = st.columns(3)
     with col1:
         if db_connected:
-            st.success("�️ Azure SQL: Connected")
+            st.success("Azure SQL: Connected")
         else:
             st.error("Azure SQL: Disconnected")
     
@@ -476,6 +501,9 @@ def ask_page(selected_schemes):
     
     # Process query
     if query and st.button("Execute Query"):
+        # Log the query execution
+        log_query(query)
+        
         # Add to chat history
         st.session_state.chat_history.append({
             'timestamp': datetime.now(),
@@ -490,7 +518,8 @@ def ask_page(selected_schemes):
             openai_result = natural_language_to_sql(query, show_reasoning=True)
             
             if "error" in openai_result:
-                st.error(f"OpenAI Error: {openai_result['error']}")
+                error_msg = openai_result['error']
+                st.error(f"OpenAI Error: {error_msg}")
                 st.session_state.chat_history.pop()
             else:
                 sql_query = openai_result.get('sql_query', '')
@@ -534,7 +563,7 @@ def ask_page(selected_schemes):
                         st.session_state.chat_history.pop()
     
     # Display query results
-    st.subheader("� Query Results")
+    st.subheader(" Query Results")
     
     for i, chat in enumerate(reversed(st.session_state.chat_history)):
         # User query
@@ -560,12 +589,14 @@ def ask_page(selected_schemes):
                             col1, col2 = st.columns(2)
                             with col1:
                                 csv = chat['response']['data'].to_csv(index=False)
-                                st.download_button("Download CSV", csv, f"query_result_{i}.csv", "text/csv")
+                                if st.download_button("Download CSV", csv, f"query_result_{i}.csv", "text/csv"):
+                                    log_export("CSV")
                             with col2:
                                 buffer = BytesIO()
                                 chat['response']['data'].to_excel(buffer, index=False, engine='openpyxl')
                                 buffer.seek(0)  # Reset buffer position
-                                st.download_button("Download Excel", buffer.getvalue(), f"query_result_{i}.xlsx")
+                                if st.download_button("Download Excel", buffer.getvalue(), f"query_result_{i}.xlsx"):
+                                    log_export("Excel")
                         else:
                             st.info("Data export requires analyst or admin role. Contact your administrator for access.")
                 
@@ -1076,7 +1107,7 @@ def admin_page():
     st.info(f"**Admin:** {user.get('name', 'Unknown')} ({user.get('email', 'No email')})")
     
     # Tab navigation for admin functions
-    tab1, tab2, tab3, tab4 = st.tabs(["User Management", "Access Control", "System Monitoring", "Settings"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["User Management", "Access Control", "System Monitoring", "Access Logs", "Settings"])
     
     with tab1:
         st.subheader("User Management")
@@ -1254,7 +1285,79 @@ def admin_page():
         })
         st.dataframe(activity_data, use_container_width=True)
     
-    with tab3:
+    with tab4:
+        st.subheader("Access Logs")
+        
+        # Access logs summary stats
+        stats = access_logger.get_summary_stats()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Events", stats['total_events'])
+        with col2:
+            st.metric("Unique Users", stats['unique_users'])
+        with col3:
+            st.metric("Login Events", stats['login_events'])
+        with col4:
+            st.metric("Recent Activity (24h)", stats['recent_activity'])
+        
+        st.divider()
+        
+        # Filters for log viewing
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            event_filter = st.selectbox(
+                "Event Type:", 
+                ["All", "login", "logout", "query", "export", "page_access", "admin_action", "security"],
+                index=0
+            )
+        
+        with col2:
+            # Get list of users for filter
+            all_logs = access_logger.get_logs(limit=1000)
+            unique_users = list(set([log.get('user_email', 'Unknown') for log in all_logs if log.get('user_email') != 'Anonymous']))
+            unique_users.insert(0, "All Users")
+            user_filter = st.selectbox("User:", unique_users, index=0)
+        
+        with col3:
+            days_back = st.selectbox("Time Range:", [1, 7, 30, 90, 365], index=1, format_func=lambda x: f"Last {x} days")
+        
+        # Apply filters
+        event_type_filter = None if event_filter == "All" else event_filter
+        user_email_filter = None if user_filter == "All Users" else user_filter
+        start_date = (datetime.now() - timedelta(days=days_back)).date()
+        
+        # Get filtered logs
+        logs_df = access_logger.get_logs_dataframe(
+            limit=200,
+            event_type=event_type_filter,
+            user_email=user_email_filter,
+            start_date=start_date
+        )
+        
+        if not logs_df.empty:
+            st.dataframe(logs_df, use_container_width=True, height=400)
+            
+            # Export logs functionality
+            if st.button("Export Logs as CSV"):
+                csv_data = logs_df.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv_data,
+                    file_name=f"access_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+                log_admin_action("Export access logs", "CSV export")
+        else:
+            st.info("No logs found matching the selected criteria.")
+        
+        # Real-time log monitoring toggle
+        if st.checkbox("Enable Real-time Monitoring (refresh every 30 seconds)"):
+            time.sleep(30)
+            st.rerun()
+    
+    with tab5:
         st.subheader("System Settings")
         
         # Application settings
@@ -1336,13 +1439,18 @@ def main():
     if not require_in_app_authentication():
         return
     
+    # Get current user for access logging
+    current_user = get_current_user()
+    
+    # Log successful login (only once per session)
+    if current_user and not st.session_state.get('last_login_logged', False):
+        log_login(current_user)
+        st.session_state.last_login_logged = True
+    
     # Show API connection status popup
     show_api_status_popup()
     
     selected_schemes, selected_regions, date_from, date_to = create_sidebar()
-    
-    # Get current user for role-based navigation
-    current_user = get_current_user()
     
     # Navigation with role-based access using RBAC system
     available_pages = []
@@ -1378,30 +1486,39 @@ def main():
     
     selected_page = st.selectbox("Navigate to:", available_pages, label_visibility="collapsed")
     
+    # Log page access (only if different from last page)
+    if st.session_state.get('current_page') != selected_page:
+        log_page_access(selected_page)
+        st.session_state.current_page = selected_page
+    
     # Page routing with role-based access control
     if selected_page == "Query":
         # Check if user can access natural language queries
         if rbac.check_feature_access('natural_language_query'):
             ask_page(selected_schemes)
         else:
+            log_security_event(f"Unauthorized access attempt to Query page")
             st.error("Access denied to Query feature")
     
     elif selected_page == "Reports":
         if rbac.check_feature_access('view_reports'):
             reports_page()  # Will implement this
         else:
+            log_security_event(f"Unauthorized access attempt to Reports page")
             st.error("Access denied to Reports feature")
     
     elif selected_page == "Database":
         if rbac.check_feature_access('database_query'):
             database_page()  # Will implement this
         else:
+            log_security_event(f"Unauthorized access attempt to Database page")
             st.error("Access denied to Database feature")
     
     elif selected_page == "Admin":
         if rbac.check_feature_access('user_management'):
             admin_page()
         else:
+            log_security_event(f"Unauthorized access attempt to Admin panel")
             st.error("Access denied to Admin panel")
     
     elif selected_page == "Help":
