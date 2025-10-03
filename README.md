@@ -12,7 +12,6 @@ A comprehensive AI-powered platform for managing public welfare schemes and citi
 ###  **AI-Powered Query Interface**
 - **Natural Language to SQL**: Convert plain English queries to SQL using Azure OpenAI
 - **Voice Input**: Speech-to-text integration with Azure Speech Service
-- **Intelligent Fallback**: Pattern-based SQL generation when AI services are unavailable
 - **Smart Chart Generation**: Automatic pie chart visualization for query results
 
 ###  **User Management & Security**
@@ -31,7 +30,6 @@ A comprehensive AI-powered platform for managing public welfare schemes and citi
 - **Containerized Deployment**: Docker-based architecture
 - **Azure Integration**: Full Azure stack (SQL, OpenAI, Speech, Container Apps)
 - **Responsive UI**: Professional Streamlit interface with custom styling
-- **Multi-language Support**: Hindi and English language capabilities
 
 ##  Architecture
 
