@@ -191,7 +191,7 @@ async def nl2sql(request: Request):
 async def root():
     """API Root - Welcome message and basic info"""
     return {
-        "message": "🚀 Data Interpreter Assistant API",
+        "message": " Data Interpreter Assistant API",
         "status": "healthy",
         "version": "1.0.0",
         "timestamp": datetime.utcnow().isoformat(),
@@ -247,7 +247,7 @@ async def internal_error_handler(request: Request, exc):
 
 if __name__ == "__main__":
     # Enhanced startup configuration
-    logger.info("🚀 Starting Data Interpreter Assistant API...")
+    logger.info(" Starting Data Interpreter Assistant API...")
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
