@@ -1,6 +1,6 @@
 """
 Database connection and query execution module for Azure SQL Database
-Enhanced version with local SQLite fallback and better error handling
+
 """
 import os
 import pyodbc
