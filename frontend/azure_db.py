@@ -12,7 +12,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load environment variables
+# Load environment variables from root directory
+load_dotenv(dotenv_path="../.env")
+# Also try current directory as fallback
 load_dotenv()
 
 def get_azure_connection():
