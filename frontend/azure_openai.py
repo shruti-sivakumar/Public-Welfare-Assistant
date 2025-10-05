@@ -9,7 +9,9 @@ import streamlit as st
 import logging
 import json
 
-# Load environment variables
+# Load environment variables from root directory
+load_dotenv(dotenv_path="../.env")
+
 load_dotenv()
 
 # Configure logging
