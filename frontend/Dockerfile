@@ -24,7 +24,7 @@ COPY . .
 ENV PORT=8501
 ENV WEBSITES_PORT=8501
 
-# (Optional) turn off headless warning banners
+# turn off headless warning banners
 ENV STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 
 EXPOSE 8501
